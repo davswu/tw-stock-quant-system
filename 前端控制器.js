@@ -1,5 +1,5 @@
 // 請替換為您第一步部署成功獲得的 Apps Script URL
-const GAS_API_URL = "YOUR_DEPLOYED_GAS_WEB_APP_URL";
+const GAS_API_URL = https://script.google.com/macros/s/AKfycby49iaY-L8CWl7-nLstW9NkpNCr6g9vfbOYl2ZNRdsN_rDUYypO7JOvaxvNealrhVb8/exec;
 
 async function analyzeStock() {
     const codeInput = document.getElementById("stockInput");
