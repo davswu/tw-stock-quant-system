@@ -1,5 +1,5 @@
 /**
- * 前端主控邏輯 (API 對接、4-Card 佈局渲染與事件處理)
+ * 前端主控邏輯 (API 對接、4-Card 佈局渲染與時間邏輯判斷)
  */
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbw0aLFtVlWNgFjxxiYMZZEIyE7nDFc_Lkpp6Eo_gdzuL1gtLydSSrQ53GN6jQvVCBOC/exec";
 
@@ -11,11 +11,6 @@ async function analyzeStock() {
     document.getElementById("decisionDesc").innerText = "正在連線抓取 Google Finance 數據與計算決策矩陣...";
 
     try {
-        if (!GAS_API_URL || GAS_API_URL.includes("YOUR_GAS_DEPLOYMENT_URL")) {
-            alert("請先設定正確的 GAS_API_URL！");
-            return;
-        }
-
         const res = await fetch(`${GAS_API_URL}?code=${encodeURIComponent(code)}`);
         const rawData = await res.json();
 
@@ -24,13 +19,13 @@ async function analyzeStock() {
             return;
         }
 
-        // 方框 1：股票代碼與中英文名稱
+        // 方框 1：股票代碼與名稱
         const titleContainer = document.getElementById("stockTitle");
         if (titleContainer) {
             titleContainer.innerHTML = `<span class="text-2xl font-extrabold text-white">${code}</span> <span class="text-xs text-slate-300 font-normal mt-0.5">${rawData.name || ''}</span>`;
         }
 
-        // 執行對數 T-Score 與 4-Layer 診斷矩陣引擎
+        // 執行量化決策引擎
         const engine = new QuantDecisionEngine(rawData.data);
         const result = engine.getLatestAnalysis();
 
@@ -39,28 +34,36 @@ async function analyzeStock() {
             return;
         }
 
-        updateUI(result);
+        updateUI(result, rawData.isBefore9AM);
 
     } catch (err) {
         console.error("Fetch Error:", err);
-        document.getElementById("decisionDesc").innerText = "資料連線失敗，請檢查網路連線或 GAS API 部署權限。";
+        document.getElementById("decisionDesc").innerText = "資料連線失敗，請檢查網路連線或 GAS API 部署狀態。";
     }
 }
 
-function updateUI(res) {
+function updateUI(res, isBefore9AM) {
     const { current, delta, decision } = res;
 
-    // 方框 2：當日股價
-    document.getElementById("stockPrice").innerText = `NT$ ${current.close.toFixed(2)}`;
+    // 1. 動態標示 <09:00 (T-1) 或 >=09:00 (T 即時)
+    const priceLabel = document.getElementById("priceLabel");
+    const volumeLabel = document.getElementById("volumeLabel");
+    
+    if (priceLabel) {
+        priceLabel.innerText = isBefore9AM ? "昨日 (T-1) 收盤價" : "當日 (T) 即時股價";
+    }
+    if (volumeLabel) {
+        volumeLabel.innerText = isBefore9AM ? "昨日 (T-1) 成交量" : "當日 (T) 即時成交量";
+    }
 
-    // 方框 3：當日成交量 (以張為單位並進行千分位格式化)
+    // 2. 方框 2 & 3：當日股價與成交量 (張)
+    document.getElementById("stockPrice").innerText = `NT$ ${current.close.toFixed(2)}`;
     const formattedVol = Number(current.volume).toLocaleString();
     document.getElementById("stockVolume").innerText = `${formattedVol} 張`;
 
-    // 方框 1：系統決策說明
+    // 3. 方框 1 & 4：系統決策說明與 Badge 顏色
     document.getElementById("decisionDesc").innerText = `${decision.name}：${decision.desc}`;
 
-    // 方框 4：系統決策訊號 Badge
     const badge = document.getElementById("signalBadge");
     const cardSignal = document.getElementById("cardSignal");
     badge.innerText = `${decision.name} | ${decision.signal}`;
@@ -76,13 +79,13 @@ function updateUI(res) {
         badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm md:text-base bg-sky-500/20 text-sky-400 border border-sky-500/30 text-center";
     }
 
-    // 更新四指標 T-Score 卡片
+    // 4. 更新四指標 T-Score 現況卡片
     updateCard("sdv", current.SDV, getLevelDesc("SDV", current.SDV));
     updateCard("vdv", current.VDV, getLevelDesc("VDV", current.VDV));
     updateCard("adv", current.ADV, getLevelDesc("ADV", current.ADV));
     updateCard("bdv", current.BDV, getLevelDesc("BDV", current.BDV));
 
-    // 更新 Δ 多週期動能表格
+    // 5. 更新 Δ 動能矩陣表格
     const tbody = document.getElementById("deltaMatrixBody");
     tbody.innerHTML = `
         ${renderRow("SDV (股價離差)", current.SDV, delta.SDV_1, delta.SDV_5, delta.SDV_10)}

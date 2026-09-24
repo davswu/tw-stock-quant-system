@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>台股實時四指標與決策系統</title>
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen p-4 md:p-8">
@@ -28,9 +27,9 @@
             </div>
         </header>
 
-        <!-- 主區域：4 卡片獨立方框佈局 -->
+        <!-- 4-Card 佈局方框區 -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <!-- 方框 1：代碼、股票名稱、決策診斷說明 -->
+            <!-- 方框 1：代碼、名稱、診斷說明 -->
             <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
                 <div>
                     <div id="stockTitle" class="flex flex-col">
@@ -41,18 +40,18 @@
                 <p id="decisionDesc" class="text-xs text-slate-400 mt-3 leading-relaxed">請點擊實時分析開啟即時數據對接...</p>
             </div>
 
-            <!-- 方框 2：當日股價 -->
+            <!-- 方框 2：股價 (標籤動態切換) -->
             <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
-                <div class="text-xs font-bold text-slate-400 mb-1">
-                    當日股價 <span class="text-[10px] font-normal text-rose-400/90 block mt-0.5">(*開盤前則為昨日收盤價)</span>
+                <div id="priceLabel" class="text-xs font-bold text-slate-400 mb-1">
+                    當日 (T) 即時股價
                 </div>
                 <div id="stockPrice" class="text-2xl md:text-3xl font-extrabold font-mono text-emerald-400">NT$ --</div>
             </div>
 
-            <!-- 方框 3：當日成交量 -->
+            <!-- 方框 3：成交量 (標籤動態切換) -->
             <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
-                <div class="text-xs font-bold text-slate-400 mb-1">
-                    當日成交量 <span class="text-[10px] font-normal text-rose-400/90 block mt-0.5">(*開盤前則為昨日收盤成交量)</span>
+                <div id="volumeLabel" class="text-xs font-bold text-slate-400 mb-1">
+                    當日 (T) 即時成交量
                 </div>
                 <div id="stockVolume" class="text-2xl md:text-3xl font-extrabold font-mono text-sky-400">-- 張</div>
             </div>
@@ -66,45 +65,37 @@
             </div>
         </div>
 
-        <!-- 四指標 T-Score 現況卡片 -->
+        <!-- 四指標 T-Score 現況 -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <!-- SDV -->
             <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 relative overflow-hidden">
                 <div class="text-xs font-bold text-slate-400 mb-1">價格位階 (SDV)</div>
                 <div id="sdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
                 <div id="sdvStatus" class="text-xs mt-2 text-slate-400">--</div>
-                <div class="absolute top-0 right-0 p-3 opacity-10 text-4xl">📈</div>
             </div>
             
-            <!-- VDV -->
             <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 relative overflow-hidden">
                 <div class="text-xs font-bold text-slate-400 mb-1">資金強度 (VDV)</div>
                 <div id="vdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
                 <div id="vdvStatus" class="text-xs mt-2 text-slate-400">--</div>
-                <div class="absolute top-0 right-0 p-3 opacity-10 text-4xl">📊</div>
             </div>
 
-            <!-- ADV -->
             <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 relative overflow-hidden">
                 <div class="text-xs font-bold text-slate-400 mb-1">風險環境 (ADV)</div>
                 <div id="advValue" class="text-4xl font-extrabold font-mono text-white">--</div>
                 <div id="advStatus" class="text-xs mt-2 text-slate-400">--</div>
-                <div class="absolute top-0 right-0 p-3 opacity-10 text-4xl">⚡</div>
             </div>
 
-            <!-- BDV -->
             <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 relative overflow-hidden">
                 <div class="text-xs font-bold text-slate-400 mb-1">週期張力 (BDV)</div>
                 <div id="bdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
                 <div id="bdvStatus" class="text-xs mt-2 text-slate-400">--</div>
-                <div class="absolute top-0 right-0 p-3 opacity-10 text-4xl">🎯</div>
             </div>
         </div>
 
-        <!-- 多週期 Δ 動能矩陣區塊 -->
+        <!-- Δ 動能矩陣區塊 -->
         <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-            <h3 class="text-lg font-bold text-slate-200 mb-4 flex items-center gap-2">
-                <span>多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)</span>
+            <h3 class="text-lg font-bold text-slate-200 mb-4">
+                多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)
             </h3>
             
             <div class="overflow-x-auto">
@@ -127,7 +118,6 @@
 
     </div>
 
-    <!-- 載入腳本 -->
     <script src="quantEngine.js"></script>
     <script src="main.js"></script>
 </body>
