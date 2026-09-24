@@ -28,23 +28,41 @@
             </div>
         </header>
 
-        <!-- 主 Banner：股票資訊與實時決策訊號 -->
-        <div id="decisionBanner" class="bg-slate-800 border-l-8 border-sky-500 p-6 rounded-r-xl shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-                <div class="flex flex-wrap items-baseline gap-3">
-                    <div id="stockTitle" class="flex items-baseline">
-                        <span class="text-3xl font-extrabold text-white">2330</span>
-                        <span class="text-base text-slate-300 font-normal ml-2">--</span>
+        <!-- 主區域：4 卡片獨立方框佈局 -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <!-- 方框 1：代碼、股票名稱、決策診斷說明 -->
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
+                <div>
+                    <div id="stockTitle" class="flex flex-col">
+                        <span class="text-2xl font-extrabold text-white">2330</span>
+                        <span class="text-xs text-slate-300 font-normal mt-0.5">--</span>
                     </div>
-                    <span id="stockPrice" class="text-2xl font-mono text-emerald-400">NT$ --</span>
                 </div>
-                <p id="decisionDesc" class="text-sm text-slate-300 mt-2">請點擊實時分析開啟即時數據對接...</p>
+                <p id="decisionDesc" class="text-xs text-slate-400 mt-3 leading-relaxed">請點擊實時分析開啟即時數據對接...</p>
             </div>
-            <div class="text-right">
-                <span class="text-xs text-slate-400 uppercase tracking-wider block">系統決策訊號</span>
-                <span id="signalBadge" class="inline-block mt-1 px-4 py-2 rounded-md font-bold text-lg bg-slate-700 text-slate-300">
+
+            <!-- 方框 2：當日股價 -->
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
+                <div class="text-xs font-bold text-slate-400 mb-1">
+                    當日股價 <span class="text-[10px] font-normal text-rose-400/90 block mt-0.5">(*開盤前則為昨日收盤價)</span>
+                </div>
+                <div id="stockPrice" class="text-2xl md:text-3xl font-extrabold font-mono text-emerald-400">NT$ --</div>
+            </div>
+
+            <!-- 方框 3：當日成交量 -->
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
+                <div class="text-xs font-bold text-slate-400 mb-1">
+                    當日成交量 <span class="text-[10px] font-normal text-rose-400/90 block mt-0.5">(*開盤前則為昨日收盤成交量)</span>
+                </div>
+                <div id="stockVolume" class="text-2xl md:text-3xl font-extrabold font-mono text-sky-400">-- 張</div>
+            </div>
+
+            <!-- 方框 4：系統決策訊號 -->
+            <div id="cardSignal" class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
+                <div class="text-xs font-bold text-slate-400 mb-1">系統決策訊號</div>
+                <div id="signalBadge" class="inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm md:text-base bg-slate-700 text-slate-300 text-center">
                     等待分析
-                </span>
+                </div>
             </div>
         </div>
 

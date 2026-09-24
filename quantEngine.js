@@ -92,6 +92,7 @@ class QuantDecisionEngine {
       tScoresHistory.push({
         date: curr.date,
         close: curr.close,
+        volume: curr.volume,
         SDV: calcTS(curr.close, lnP),
         VDV: calcTS(curr.volume, lnV),
         ADV: calcTS(curr.atr, lnA),
