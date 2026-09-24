@@ -1,5 +1,5 @@
 /**
- * 台股四指標對數標準化與系統決策矩陣計算引擎
+ * 台股四指標對數標準化 (T-Score) 與雙層決策矩陣引擎
  */
 class QuantDecisionEngine {
   constructor(ohlcvData) {
@@ -104,7 +104,7 @@ class QuantDecisionEngine {
     this.tScores = tScoresHistory.filter(d => d !== null);
   }
 
-  // 3. 計算最新一日的指標與 Δ1, Δ5, Δ10 矩陣
+  // 3. 計算最新一日指標與 Δ1, Δ5, Δ10 多週期動能矩陣
   getLatestAnalysis() {
     this.calculateTScores();
     const ts = this.tScores;
@@ -133,7 +133,7 @@ class QuantDecisionEngine {
     };
   }
 
-  // 4. 雙層四階系統決策矩陣比對模組
+  // 4. 雙層共振決策矩陣模組
   matchDecisionMatrix(t, d) {
     const { SDV, VDV, ADV, BDV } = t;
 
