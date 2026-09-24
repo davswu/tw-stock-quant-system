@@ -66,13 +66,11 @@ class QuantDecisionEngine {
     let tScoresHistory = [];
 
     for (let i = 0; i < len; i++) {
-      // index 19 為首個 20日帶寬值，往後推 30 天視窗，第一個可計算 T-Score 的 index 為 48
       if (i < windowSize + 18) {
         tScoresHistory.push(null);
         continue;
       }
 
-      // 截取過去 30 日視窗
       const window = this.data.slice(i - windowSize + 1, i + 1);
 
       const lnP = window.map(d => Math.log(Math.max(d.close, 0.0001)));
@@ -110,7 +108,7 @@ class QuantDecisionEngine {
     const ts = this.tScores;
     const len = ts.length;
 
-    if (len < 11) return null; // 數據不足計算 Δ10
+    if (len < 11) return null;
 
     const t = ts[len - 1];
     const t_1 = ts[len - 2];

@@ -8,23 +8,27 @@ async function analyzeStock() {
     const code = codeInput ? codeInput.value.trim() : "2330";
     if (!code) return;
 
-    document.getElementById("decisionDesc").innerText = "正在透過 GAS API 連線抓取 Google Finance 行情與進行對數轉換...";
+    document.getElementById("decisionDesc").innerText = "正在連線抓取 Google Finance 數據與計算決策矩陣...";
 
     try {
-        let rawData;
-        if (GAS_API_URL && !GAS_API_URL.includes("YOUR_GAS_DEPLOYMENT_URL")) {
-            const res = await fetch(`${GAS_API_URL}?code=${encodeURIComponent(code)}`);
-            rawData = await res.json();
-        } else {
-            rawData = generateMockData(code);
+        if (!GAS_API_URL || GAS_API_URL.includes("YOUR_GAS_DEPLOYMENT_URL")) {
+            alert("請先設定正確的 GAS_API_URL！");
+            return;
         }
+
+        const res = await fetch(`${GAS_API_URL}?code=${encodeURIComponent(code)}`);
+        const rawData = await res.json();
 
         if (!rawData || rawData.status === "error" || !rawData.data || rawData.data.length === 0) {
             document.getElementById("decisionDesc").innerText = rawData.message || "無法取得行情資料，請確認台股代碼是否正確。";
             return;
         }
 
-        document.getElementById("stockTitle").innerText = `${code} ${rawData.name || ''}`;
+        // 股票代碼保持大字體，名稱改用較小字體呈現
+        const titleContainer = document.getElementById("stockTitle");
+        if (titleContainer) {
+            titleContainer.innerHTML = `<span class="text-3xl font-extrabold text-white">${code}</span> <span class="text-base text-slate-300 font-normal ml-2">${rawData.name || ''}</span>`;
+        }
 
         const engine = new QuantDecisionEngine(rawData.data);
         const result = engine.getLatestAnalysis();
@@ -38,7 +42,7 @@ async function analyzeStock() {
 
     } catch (err) {
         console.error("Fetch Error:", err);
-        document.getElementById("decisionDesc").innerText = "資料連線失敗，請確認 GAS API 部署權限。";
+        document.getElementById("decisionDesc").innerText = "資料連線失敗，請檢查網路連線或 GAS API 部署權限。";
     }
 }
 
@@ -106,21 +110,4 @@ function getLevelDesc(type, val) {
     if (val >= 40) return "40~49 中性偏空/收斂整理";
     if (val >= 30) return "30~39 空頭強勢/高度擠壓";
     return "<30 極致超賣/Squeeze臨界";
-}
-
-function generateMockData(code) {
-    let data = [];
-    let price = 900;
-    for (let i = 0; i < 60; i++) {
-        price += (Math.random() - 0.48) * 15;
-        data.push({
-            date: `2026-09-${(i % 30) + 1}`,
-            open: price - 2,
-            high: price + 8,
-            low: price - 6,
-            close: price,
-            volume: Math.floor(Math.random() * 30000) + 10000
-        });
-    }
-    return { name: "模擬測試資料", data: data };
 }
