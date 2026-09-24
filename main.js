@@ -20,19 +20,17 @@ async function analyzeStock() {
         }
 
         if (!rawData || rawData.status === "error" || !rawData.data || rawData.data.length === 0) {
-            document.getElementById("decisionDesc").innerText = rawData.message || "無法取得行情資料，請確認台股代碼是否正確或資料尚未暖機。";
+            document.getElementById("decisionDesc").innerText = rawData.message || "無法取得行情資料，請確認台股代碼是否正確。";
             return;
         }
 
-        // 呈現格式：2330 台積電 (Taiwan Semiconductor Manufacturing Co Ltd)
         document.getElementById("stockTitle").innerText = `${code} ${rawData.name || ''}`;
 
-        // 運行量化決策矩陣引擎
         const engine = new QuantDecisionEngine(rawData.data);
         const result = engine.getLatestAnalysis();
 
         if (!result) {
-            document.getElementById("decisionDesc").innerText = "數據筆數不足 60 天，無法完成對數 T-Score 與 Δ10 矩陣計算。";
+            document.getElementById("decisionDesc").innerText = "數據筆數不足，無法完成對數 T-Score 與 Δ10 矩陣計算。";
             return;
         }
 
@@ -40,7 +38,7 @@ async function analyzeStock() {
 
     } catch (err) {
         console.error("Fetch Error:", err);
-        document.getElementById("decisionDesc").innerText = "資料連線失敗，請確認 GAS API 部署權限是否設為『所有人 (Anyone)』。";
+        document.getElementById("decisionDesc").innerText = "資料連線失敗，請確認 GAS API 部署權限。";
     }
 }
 
@@ -49,13 +47,11 @@ function updateUI(res) {
 
     document.getElementById("stockPrice").innerText = `NT$ ${current.close.toFixed(2)}`;
 
-    // 更新四指標卡片
     updateCard("sdv", current.SDV, getLevelDesc("SDV", current.SDV));
     updateCard("vdv", current.VDV, getLevelDesc("VDV", current.VDV));
     updateCard("adv", current.ADV, getLevelDesc("ADV", current.ADV));
     updateCard("bdv", current.BDV, getLevelDesc("BDV", current.BDV));
 
-    // 更新 Banner 系統訊號
     const banner = document.getElementById("decisionBanner");
     const badge = document.getElementById("signalBadge");
     document.getElementById("decisionDesc").innerText = `${decision.name}：${decision.desc}`;
@@ -72,7 +68,6 @@ function updateUI(res) {
         badge.className = "inline-block mt-1 px-4 py-2 rounded-md font-bold text-lg bg-sky-500/20 text-sky-400 border border-sky-500/30";
     }
 
-    // 更新 Δ 多週期動能表格
     const tbody = document.getElementById("deltaMatrixBody");
     tbody.innerHTML = `
         ${renderRow("SDV (股價離差)", current.SDV, delta.SDV_1, delta.SDV_5, delta.SDV_10)}
@@ -80,11 +75,6 @@ function updateUI(res) {
         ${renderRow("ADV (波動離差)", current.ADV, delta.ADV_1, delta.ADV_5, delta.ADV_10)}
         ${renderRow("BDV (帶寬離差)", current.BDV, delta.BDV_1, delta.BDV_5, delta.BDV_10)}
     `;
-
-    // 觸發 MathJax 重新渲染 DOM 內新產生的 LaTeX 標籤
-    if (window.MathJax && MathJax.typesetPromise) {
-        MathJax.typesetPromise();
-    }
 }
 
 function updateCard(type, val, desc) {
