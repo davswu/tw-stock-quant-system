@@ -1,6 +1,3 @@
-/**
- * 前端主控邏輯 (API 對接、4-Card 佈局渲染與時間邏輯判斷)
- */
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbw0aLFtVlWNgFjxxiYMZZEIyE7nDFc_Lkpp6Eo_gdzuL1gtLydSSrQ53GN6jQvVCBOC/exec";
 
 async function analyzeStock() {
@@ -15,79 +12,62 @@ async function analyzeStock() {
         const rawData = await res.json();
 
         if (!rawData || rawData.status === "error" || !rawData.data || rawData.data.length === 0) {
-            document.getElementById("decisionDesc").innerText = rawData.message || "無法取得行情資料，請確認台股代碼是否正確。";
+            document.getElementById("decisionDesc").innerText = rawData.message || "無法取得行情資料。";
             return;
         }
 
-        // 方框 1：股票代碼與名稱
-        const titleContainer = document.getElementById("stockTitle");
-        if (titleContainer) {
-            titleContainer.innerHTML = `<span class="text-2xl font-extrabold text-white">${code}</span> <span class="text-xs text-slate-300 font-normal mt-0.5">${rawData.name || ''}</span>`;
-        }
-
-        // 執行量化決策引擎
         const engine = new QuantDecisionEngine(rawData.data);
         const result = engine.getLatestAnalysis();
 
         if (!result) {
-            document.getElementById("decisionDesc").innerText = "數據筆數不足，無法完成對數 T-Score 與 Δ10 矩陣計算。";
+            document.getElementById("decisionDesc").innerText = "數據筆數不足，無法完成矩陣計算。";
             return;
         }
 
-        updateUI(result, rawData.isBefore9AM);
+        updateUI(result, rawData.isBefore9AM, rawData.name, code);
 
     } catch (err) {
         console.error("Fetch Error:", err);
-        document.getElementById("decisionDesc").innerText = "資料連線失敗，請檢查網路連線或 GAS API 部署狀態。";
+        document.getElementById("decisionDesc").innerText = "資料連線失敗，請檢查 GAS API 部署狀態。";
     }
 }
 
-function updateUI(res, isBefore9AM) {
-    const { current, delta, decision } = res;
+function updateUI(res, isBefore9AM, stockName, code) {
+    const { current, delta, decision, advRiskControl } = res;
 
-    // 1. 動態標示 <09:00 (T-1) 或 >=09:00 (T 即時)
-    const priceLabel = document.getElementById("priceLabel");
-    const volumeLabel = document.getElementById("volumeLabel");
+    // 更新代碼與名稱
+    document.getElementById("stockTitle").innerHTML = `<span class="text-2xl font-extrabold text-white">${code}</span> <span class="text-xs text-slate-300 font-normal mt-0.5">${stockName || ''}</span>`;
     
-    if (priceLabel) {
-        priceLabel.innerText = isBefore9AM ? "昨日 (T-1) 收盤價" : "當日 (T) 即時股價";
-    }
-    if (volumeLabel) {
-        volumeLabel.innerText = isBefore9AM ? "昨日 (T-1) 成交量" : "當日 (T) 即時成交量";
-    }
-
-    // 2. 方框 2 & 3：當日股價與成交量 (張)
+    // 更新價格與成交量
+    document.getElementById("priceLabel").innerText = isBefore9AM ? "昨日 (T-1) 收盤價" : "當日 (T) 即時股價";
+    document.getElementById("volumeLabel").innerText = isBefore9AM ? "昨日 (T-1) 成交量" : "當日 (T) 即時成交量";
     document.getElementById("stockPrice").innerText = `NT$ ${current.close.toFixed(2)}`;
-    const formattedVol = Number(current.volume).toLocaleString();
-    document.getElementById("stockVolume").innerText = `${formattedVol} 張`;
+    document.getElementById("stockVolume").innerText = `${Number(current.volume).toLocaleString()} 張`;
 
-    // 3. 方框 1 & 4：系統決策說明與 Badge 顏色
+    // 決策訊號
     document.getElementById("decisionDesc").innerText = `${decision.name}：${decision.desc}`;
+    document.getElementById("signalBadge").innerText = `${decision.name} | ${decision.signal}`;
 
-    const badge = document.getElementById("signalBadge");
-    const cardSignal = document.getElementById("cardSignal");
-    badge.innerText = `${decision.name} | ${decision.signal}`;
-
-    if (decision.color === "green") {
-        cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-emerald-500/80 flex flex-col justify-between shadow-lg shadow-emerald-500/10";
-        badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm md:text-base bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-center";
-    } else if (decision.color === "red") {
-        cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-rose-500/80 flex flex-col justify-between shadow-lg shadow-rose-500/10";
-        badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm md:text-base bg-rose-500/20 text-rose-400 border border-rose-500/30 text-center";
-    } else {
-        cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-sky-500/80 flex flex-col justify-between shadow-lg shadow-sky-500/10";
-        badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm md:text-base bg-sky-500/20 text-sky-400 border border-sky-500/30 text-center";
-    }
-
-    // 4. 更新四指標 T-Score 現況卡片
+    // 更新四指標 T-Score 卡片
     updateCard("sdv", current.SDV, getLevelDesc("SDV", current.SDV));
     updateCard("vdv", current.VDV, getLevelDesc("VDV", current.VDV));
     updateCard("adv", current.ADV, getLevelDesc("ADV", current.ADV));
     updateCard("bdv", current.BDV, getLevelDesc("BDV", current.BDV));
 
-    // 5. 更新 Δ 動能矩陣表格
-    const tbody = document.getElementById("deltaMatrixBody");
-    tbody.innerHTML = `
+    // 新增：更新 ADV 波動度驅動之風控卡片區塊
+    document.getElementById("advStopLossMode").innerText = advRiskControl.stopLossMode;
+    document.getElementById("advStopLossRule").innerText = advRiskControl.stopLossRule;
+    
+    const tpAlertElem = document.getElementById("advTakeProfitAlert");
+    tpAlertElem.innerText = advRiskControl.takeProfitAlert;
+    if (advRiskControl.action === "EXIT_FULL") {
+        tpAlertElem.className = "text-lg font-bold text-rose-400 bg-rose-950/50 p-2 rounded border border-rose-500/50 animate-pulse";
+    } else {
+        tpAlertElem.className = "text-sm font-semibold text-emerald-400";
+    }
+
+    // 更新 Δ 動能矩陣表格
+    document.getElementById("deltaMatrixBody").innerHTML = `
         ${renderRow("SDV (股價離差)", current.SDV, delta.SDV_1, delta.SDV_5, delta.SDV_10)}
         ${renderRow("VDV (量能離差)", current.VDV, delta.VDV_1, delta.VDV_5, delta.VDV_10)}
         ${renderRow("ADV (波動離差)", current.ADV, delta.ADV_1, delta.ADV_5, delta.ADV_10)}
