@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>台股實時四指標與 ADV 風控決策系統</title>
+    <title>台股實時四指標與決策系統</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen p-4 md:p-8">
@@ -13,12 +13,12 @@
         <!-- Header & 搜尋欄 -->
         <header class="flex flex-col md:flex-row justify-between items-center bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg gap-4">
             <div>
-                <h1 class="text-2xl font-bold text-sky-400">台股實時四指標與 ADV 風控決策矩陣</h1>
-                <p class="text-xs text-slate-400 mt-1">對數 T-Score + 多週期動能 + ADV 動態移動停利停損機制</p>
+                <h1 class="text-2xl font-bold text-sky-400">台股實時四指標與系統決策矩陣</h1>
+                <p class="text-xs text-slate-400 mt-1">對數標準化 (T-Score) + 多週期動能 (Δ₁ / Δ₅ / Δ₁₀) + ADV 動態移動風控</p>
             </div>
             
             <div class="flex items-center space-x-2 w-full md:w-auto">
-                <input type="text" id="stockInput" value="8150" placeholder="輸入台股代碼 (如 8150)" 
+                <input type="text" id="stockInput" value="2330" placeholder="輸入台股代碼 (如 2330)" 
                        class="bg-slate-900 border border-slate-600 px-4 py-2 rounded-lg text-white font-mono focus:outline-none focus:border-sky-500 w-full md:w-48">
                 <button onclick="analyzeStock()" 
                         class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded-lg font-bold transition text-white whitespace-nowrap">
@@ -29,85 +29,101 @@
 
         <!-- 4-Card 佈局方框區 -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <!-- 方框 1：代碼、名稱、診斷說明 -->
             <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
-                <div id="stockTitle" class="flex flex-col">
-                    <span class="text-2xl font-extrabold text-white">8150</span>
-                    <span class="text-xs text-slate-300 font-normal mt-0.5">南茂</span>
+                <div>
+                    <div id="stockTitle" class="flex flex-col">
+                        <span class="text-2xl font-extrabold text-white">2330</span>
+                        <span class="text-xs text-slate-300 font-normal mt-0.5">--</span>
+                    </div>
                 </div>
-                <p id="decisionDesc" class="text-xs text-slate-400 mt-3 leading-relaxed">請點擊實時分析開啟數據對接...</p>
+                <p id="decisionDesc" class="text-xs text-slate-400 mt-3 leading-relaxed">請點擊實時分析開啟即時數據對接...</p>
             </div>
 
+            <!-- 方框 2：股價 (標籤動態切換) -->
             <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
-                <div id="priceLabel" class="text-xs font-bold text-slate-400 mb-1">當日 (T) 即時股價</div>
+                <div id="priceLabel" class="text-xs font-bold text-slate-400 mb-1">
+                    當日 (T) 即時股價
+                </div>
                 <div id="stockPrice" class="text-2xl md:text-3xl font-extrabold font-mono text-emerald-400">NT$ --</div>
             </div>
 
+            <!-- 方框 3：成交量 (標籤動態切換) -->
             <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
-                <div id="volumeLabel" class="text-xs font-bold text-slate-400 mb-1">當日 (T) 即時成交量</div>
+                <div id="volumeLabel" class="text-xs font-bold text-slate-400 mb-1">
+                    當日 (T) 即時成交量
+                </div>
                 <div id="stockVolume" class="text-2xl md:text-3xl font-extrabold font-mono text-sky-400">-- 張</div>
             </div>
 
+            <!-- 方框 4：系統決策訊號 -->
             <div id="cardSignal" class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
                 <div class="text-xs font-bold text-slate-400 mb-1">系統決策訊號</div>
-                <div id="signalBadge" class="inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-slate-700 text-slate-300 text-center">
+                <div id="signalBadge" class="inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm md:text-base bg-slate-700 text-slate-300 text-center">
                     等待分析
                 </div>
             </div>
         </div>
 
-        <!-- 四指標 T-Score 卡片區 -->
+        <!-- 四指標 T-Score 現況 -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700">
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 relative overflow-hidden">
                 <div class="text-xs font-bold text-slate-400 mb-1">價格位階 (SDV)</div>
                 <div id="sdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
                 <div id="sdvStatus" class="text-xs mt-2 text-slate-400">--</div>
             </div>
-            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700">
+            
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 relative overflow-hidden">
                 <div class="text-xs font-bold text-slate-400 mb-1">資金強度 (VDV)</div>
                 <div id="vdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
                 <div id="vdvStatus" class="text-xs mt-2 text-slate-400">--</div>
             </div>
-            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700">
+
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 relative overflow-hidden">
                 <div class="text-xs font-bold text-slate-400 mb-1">風險環境 (ADV)</div>
                 <div id="advValue" class="text-4xl font-extrabold font-mono text-white">--</div>
                 <div id="advStatus" class="text-xs mt-2 text-slate-400">--</div>
             </div>
-            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700">
+
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 relative overflow-hidden">
                 <div class="text-xs font-bold text-slate-400 mb-1">週期張力 (BDV)</div>
                 <div id="bdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
                 <div id="bdvStatus" class="text-xs mt-2 text-slate-400">--</div>
             </div>
         </div>
 
-        <!-- 新增：ADV 波動度驅動之動態移動停利停損風控專區 -->
+        <!-- 新增：ADV 波動度驅動之動態移動風控樞紐區塊 -->
         <div class="bg-slate-800/90 p-6 rounded-xl border border-sky-500/30 shadow-xl space-y-4">
             <div class="flex items-center justify-between border-b border-slate-700 pb-3">
                 <h3 class="text-lg font-bold text-sky-400 flex items-center gap-2">
                     🛡️ ADV 波動度驅動之動態移動風控樞紐 (Trailing Risk Control)
                 </h3>
-                <span class="text-xs px-2.5 py-1 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/20">動態適應型</span>
+                <span class="text-xs px-2.5 py-1 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/20">適應型移動風控</span>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <!-- 左側：階梯式停損策略 -->
+                <!-- 階梯式停損策略 -->
                 <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-700/80">
                     <div class="text-xs text-slate-400 mb-1">當前 ADV 停損模式 (Dynamic Stop-Loss)</div>
                     <div id="advStopLossMode" class="text-base font-bold text-amber-400">--</div>
                     <div id="advStopLossRule" class="text-xs text-slate-300 mt-2 leading-relaxed">--</div>
                 </div>
 
-                <!-- 右側：過熱噴發拐點停利監控 -->
+                <!-- 過熱噴發拐點停利監控 -->
                 <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-700/80">
                     <div class="text-xs text-slate-400 mb-1">極致爆發移動停利監控 (Trailing Take-Profit)</div>
                     <div id="advTakeProfitAlert" class="text-sm font-semibold text-emerald-400">常態監控中</div>
-                    <div class="text-xs text-slate-400 mt-2">過熱條件：SDV ≥ 65 & ADV ≥ 70 且 Δ₁ADV ≤ -3.0 (高點拐點出場)</div>
+                    <div class="text-xs text-slate-400 mt-2">觸發條件：SDV ≥ 65 & ADV ≥ 70 且 Δ₁ADV ≤ -3.0 (情緒爆發拐點出場)</div>
                 </div>
             </div>
         </div>
 
         <!-- Δ 動能矩陣區塊 -->
         <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-            <h3 class="text-lg font-bold text-slate-200 mb-4">多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)</h3>
+            <h3 class="text-lg font-bold text-slate-200 mb-4">
+                多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)
+            </h3>
+            
             <div class="overflow-x-auto">
                 <table class="w-full text-center text-sm border-collapse">
                     <thead>
@@ -128,7 +144,356 @@
 
     </div>
 
-    <script src="quantEngine.js"></script>
-    <script src="main.js"></script>
+    <!-- JavaScript 腳本區塊 -->
+    <script>
+        /**
+         * 台股四指標對數標準化 (T-Score) 與雙層決策矩陣引擎（整合 ADV 風控機制）
+         */
+        class QuantDecisionEngine {
+          constructor(ohlcvData) {
+            this.data = ohlcvData; // [{date, open, high, low, close, volume}, ...]
+          }
+
+          // 1. 計算 ATR (14日) 與 布林帶寬 (20日, 2個標準差)
+          calculateDerivedMetrics() {
+            const len = this.data.length;
+            let trs = [];
+            
+            for (let i = 0; i < len; i++) {
+              if (i === 0) {
+                trs.push(this.data[i].high - this.data[i].low);
+              } else {
+                const h = this.data[i].high;
+                const l = this.data[i].low;
+                const prevC = this.data[i - 1].close;
+                const tr = Math.max(h - l, Math.abs(h - prevC), Math.abs(l - prevC));
+                trs.push(tr);
+              }
+            }
+
+            let atrs = [];
+            for (let i = 0; i < len; i++) {
+              if (i < 13) {
+                atrs.push(null);
+              } else {
+                const slice = trs.slice(i - 13, i + 1);
+                const sum = slice.reduce((a, b) => a + b, 0);
+                atrs.push(sum / 14);
+              }
+            }
+
+            let bws = [];
+            for (let i = 0; i < len; i++) {
+              if (i < 19) {
+                bws.push(null);
+              } else {
+                const sliceC = this.data.slice(i - 19, i + 1).map(d => d.close);
+                const mean = sliceC.reduce((a, b) => a + b, 0) / 20;
+                const variance = sliceC.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / 20;
+                const std = Math.sqrt(variance);
+                const upper = mean + 2 * std;
+                const lower = mean - 2 * std;
+                const bw = mean === 0 ? 0 : (upper - lower) / mean;
+                bws.push(bw);
+              }
+            }
+
+            for (let i = 0; i < len; i++) {
+              this.data[i].atr = atrs[i];
+              this.data[i].bandwidth = bws[i];
+            }
+          }
+
+          // 2. 計算對數轉換與 30日 T-Score (10 * Z + 50)
+          calculateTScores(windowSize = 30) {
+            this.calculateDerivedMetrics();
+            const len = this.data.length;
+
+            let tScoresHistory = [];
+
+            for (let i = 0; i < len; i++) {
+              if (i < windowSize + 18) {
+                tScoresHistory.push(null);
+                continue;
+              }
+
+              const window = this.data.slice(i - windowSize + 1, i + 1);
+
+              const lnP = window.map(d => Math.log(Math.max(d.close, 0.0001)));
+              const lnV = window.map(d => Math.log(Math.max(d.volume, 1)));
+              const lnA = window.map(d => Math.log(Math.max(d.atr, 0.0001)));
+              const lnB = window.map(d => Math.log(Math.max(d.bandwidth, 0.0001)));
+
+              const calcTS = (val, lnArray) => {
+                const lnVal = Math.log(Math.max(val, 0.0001));
+                const mu = lnArray.reduce((a, b) => a + b, 0) / lnArray.length;
+                const variance = lnArray.reduce((a, b) => a + Math.pow(b - mu, 2), 0) / lnArray.length;
+                const sigma = Math.sqrt(variance);
+                if (sigma === 0) return 50;
+                const z = (lnVal - mu) / sigma;
+                return 10 * z + 50;
+              };
+
+              const curr = this.data[i];
+              tScoresHistory.push({
+                date: curr.date,
+                close: curr.close,
+                volume: curr.volume,
+                SDV: calcTS(curr.close, lnP),
+                VDV: calcTS(curr.volume, lnV),
+                ADV: calcTS(curr.atr, lnA),
+                BDV: calcTS(curr.bandwidth, lnB)
+              });
+            }
+
+            this.tScores = tScoresHistory.filter(d => d !== null);
+          }
+
+          // 3. 計算最新一日指標與 Δ1, Δ5, Δ10 多週期動能矩陣及 ADV 風控
+          getLatestAnalysis() {
+            this.calculateTScores();
+            const ts = this.tScores;
+            const len = ts.length;
+
+            if (len < 11) return null;
+
+            const t = ts[len - 1];
+            const t_1 = ts[len - 2];
+            const t_5 = ts[len - 6];
+            const t_10 = ts[len - 11];
+
+            const delta = {
+              SDV_1: t.SDV - t_1.SDV, SDV_5: t.SDV - t_5.SDV, SDV_10: t.SDV - t_10.SDV,
+              VDV_1: t.VDV - t_1.VDV, VDV_5: t.VDV - t_5.VDV, VDV_10: t.VDV - t_10.VDV,
+              ADV_1: t.ADV - t_1.ADV, ADV_5: t.ADV - t_5.ADV, ADV_10: t.ADV - t_10.ADV,
+              BDV_1: t.BDV - t_1.BDV, BDV_5: t.BDV - t_5.BDV, BDV_10: t.BDV - t_10.BDV
+            };
+
+            const decision = this.matchDecisionMatrix(t, delta);
+            const advRiskControl = this.evaluateADVRiskControl(t, delta);
+
+            return {
+              current: t,
+              delta: delta,
+              decision: decision,
+              advRiskControl: advRiskControl
+            };
+          }
+
+          // 4. ADV 波動度驅動動態停損停利機制
+          evaluateADVRiskControl(t, delta) {
+            let stopLossMode = "";
+            let stopLossRule = "";
+            let takeProfitAlert = "常態監控中";
+            let action = "HOLD";
+
+            // 階梯式動態停損
+            if (t.ADV < 40) {
+              stopLossMode = "低波動蓄勢期（窄停損）";
+              stopLossRule = "進場價 -2.0% 或跌破關鍵位 (SDV < 45)";
+            } else if (t.ADV <= 60) {
+              stopLossMode = "常態順勢期（標準停損）";
+              stopLossRule = "進場價 -5.0% 或 -2.0 × ATR 防線";
+            } else {
+              stopLossMode = "高波動爆發期（移動緊縮停損）";
+              stopLossRule = "自波段最高價回檔 -3.0% (Trailing Stop)";
+            }
+
+            // 過熱噴發拐點移動停利
+            if (t.SDV >= 65 && t.ADV >= 70 && delta.ADV_1 <= -3.0) {
+              takeProfitAlert = "觸發【過熱噴發拐點停利 (Blow-off Top)】";
+              action = "EXIT_FULL";
+            } else if (t.SDV >= 70 && t.BDV >= 70 && delta.SDV_1 <= -3.0) {
+              takeProfitAlert = "觸發【雙重離差過熱防線 (SDV + BDV 共振)】";
+              action = "EXIT_FULL";
+            }
+
+            return { stopLossMode, stopLossRule, takeProfitAlert, action };
+          }
+
+          // 5. 雙層共振決策矩陣模組
+          matchDecisionMatrix(t, d) {
+            const { SDV, VDV, ADV, BDV } = t;
+
+            if (ADV >= 40 && ADV <= 50 && BDV < 40 &&
+                SDV >= 50 && SDV <= 60 && VDV >= 60 &&
+                d.SDV_10 >= 3 && d.VDV_10 > 0 && d.ADV_10 <= 0 && d.BDV_10 <= -3 &&
+                d.SDV_5 >= 3 && d.VDV_5 >= 3 && d.BDV_5 <= -3 &&
+                d.SDV_1 >= 3 && d.VDV_1 >= 3 && d.ADV_1 > 0 && d.BDV_1 >= 3) {
+              return { action: "BUY_FIRST", name: "蓄勢突破", signal: "買進 (首筆)", color: "green", desc: "變盤蓄勢完成，主力放量衝過中軸，啟動強烈突破。" };
+            }
+
+            if (ADV >= 40 && ADV <= 50 && BDV >= 50 && BDV <= 60 &&
+                SDV >= 50 && SDV <= 59 && VDV < 40 &&
+                d.SDV_10 >= 3 && d.VDV_10 >= 3 && d.BDV_10 >= 3 &&
+                d.SDV_5 >= -3 && d.SDV_5 <= 0 && d.VDV_5 <= -3 && d.ADV_5 <= 0 &&
+                d.SDV_1 >= 3 && d.VDV_1 > 0 && d.BDV_1 >= 0) {
+              return { action: "BUY_ADD", name: "順勢拉回", signal: "加碼 (二次)", color: "green", desc: "主升段拉回無量洗盤結束，出現止跌陽線重啟攻勢。" };
+            }
+
+            if (ADV >= 70 && BDV >= 70 && SDV < 30 && VDV >= 70 &&
+                d.SDV_10 <= -10 && d.VDV_10 >= 10 && d.ADV_10 >= 10 && d.BDV_10 >= 10 &&
+                d.SDV_1 >= 3 && d.ADV_1 <= -3 && d.BDV_1 <= -3) {
+              return { action: "BUY_BOTTOM", name: "極致超跌", signal: "抄底買進", color: "green", desc: "恐慌盤極致釋放與天量換手，出現長下影止跌訊號。" };
+            }
+
+            if (ADV >= 70 && BDV >= 70 && SDV >= 70 && (VDV >= 70 || VDV < 40) &&
+                d.SDV_10 >= 10 && d.SDV_5 < 3 && d.VDV_5 <= -3 &&
+                d.SDV_1 <= -3 && d.BDV_1 <= -3) {
+              return { action: "EXIT_FULL_PROFIT", name: "過熱高潮", signal: "大獲利平倉", color: "red", desc: "情緒高潮與帶寬頂點，動能急遽放緩，拐點反轉離場。" };
+            }
+
+            if (ADV >= 60 && BDV >= 50 && SDV < 50 && VDV >= 60 &&
+                d.SDV_10 <= -10 && d.VDV_10 >= 3 && d.ADV_10 >= 3 && d.BDV_10 >= 3 &&
+                d.SDV_5 <= -3 && d.VDV_5 >= 3 && d.ADV_5 >= 3 && d.BDV_5 >= 3 &&
+                d.SDV_1 <= -3 && d.VDV_1 >= 3 && d.ADV_1 >= 3 && d.BDV_1 >= 3) {
+              return { action: "STOP_LOSS", name: "破位停損", signal: "完全停損離場", color: "red", desc: "跌破多空中軸，伴隨恐慌殺多賣壓，趨勢轉空停損。" };
+            }
+
+            return {
+              action: "NEUTRAL",
+              name: SDV >= 50 ? "多頭控盤/常態運作" : "空頭控盤/盤整觀望",
+              signal: SDV >= 50 ? "續抱 / 觀望" : "觀望 / 空手",
+              color: "blue",
+              desc: "市場指標處於標準常態區間，無特殊極端共振觸發訊號。"
+            };
+          }
+        }
+
+        /**
+         * 前端主控邏輯 (API 對接、UI 渲染與時間判斷)
+         */
+        const GAS_API_URL = "https://script.google.com/macros/s/AKfycbw0aLFtVlWNgFjxxiYMZZEIyE7nDFc_Lkpp6Eo_gdzuL1gtLydSSrQ53GN6jQvVCBOC/exec";
+
+        async function analyzeStock() {
+            const codeInput = document.getElementById("stockInput");
+            const code = codeInput ? codeInput.value.trim() : "2330";
+            if (!code) return;
+
+            document.getElementById("decisionDesc").innerText = "正在連線抓取 Google Finance 數據與計算決策矩陣...";
+
+            try {
+                const res = await fetch(`${GAS_API_URL}?code=${encodeURIComponent(code)}`);
+                const rawData = await res.json();
+
+                if (!rawData || rawData.status === "error" || !rawData.data || rawData.data.length === 0) {
+                    document.getElementById("decisionDesc").innerText = rawData.message || "無法取得行情資料，請確認台股代碼是否正確。";
+                    return;
+                }
+
+                const titleContainer = document.getElementById("stockTitle");
+                if (titleContainer) {
+                    titleContainer.innerHTML = `<span class="text-2xl font-extrabold text-white">${code}</span> <span class="text-xs text-slate-300 font-normal mt-0.5">${rawData.name || ''}</span>`;
+                }
+
+                const engine = new QuantDecisionEngine(rawData.data);
+                const result = engine.getLatestAnalysis();
+
+                if (!result) {
+                    document.getElementById("decisionDesc").innerText = "數據筆數不足，無法完成對數 T-Score 與 Δ10 矩陣計算。";
+                    return;
+                }
+
+                updateUI(result, rawData.isBefore9AM);
+
+            } catch (err) {
+                console.error("Fetch Error:", err);
+                document.getElementById("decisionDesc").innerText = "資料連線失敗，請檢查網路連線或 GAS API 部署狀態。";
+            }
+        }
+
+        function updateUI(res, isBefore9AM) {
+            const { current, delta, decision, advRiskControl } = res;
+
+            const priceLabel = document.getElementById("priceLabel");
+            const volumeLabel = document.getElementById("volumeLabel");
+            
+            if (priceLabel) {
+                priceLabel.innerText = isBefore9AM ? "昨日 (T-1) 收盤價" : "當日 (T) 即時股價";
+            }
+            if (volumeLabel) {
+                volumeLabel.innerText = isBefore9AM ? "昨日 (T-1) 成交量" : "當日 (T) 即時成交量";
+            }
+
+            document.getElementById("stockPrice").innerText = `NT$ ${current.close.toFixed(2)}`;
+            document.getElementById("stockVolume").innerText = `${Number(current.volume).toLocaleString()} 張`;
+
+            document.getElementById("decisionDesc").innerText = `${decision.name}：${decision.desc}`;
+
+            const badge = document.getElementById("signalBadge");
+            const cardSignal = document.getElementById("cardSignal");
+            badge.innerText = `${decision.name} | ${decision.signal}`;
+
+            if (decision.color === "green") {
+                cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-emerald-500/80 flex flex-col justify-between shadow-lg shadow-emerald-500/10";
+                badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm md:text-base bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-center";
+            } else if (decision.color === "red") {
+                cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-rose-500/80 flex flex-col justify-between shadow-lg shadow-rose-500/10";
+                badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm md:text-base bg-rose-500/20 text-rose-400 border border-rose-500/30 text-center";
+            } else {
+                cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-sky-500/80 flex flex-col justify-between shadow-lg shadow-sky-500/10";
+                badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm md:text-base bg-sky-500/20 text-sky-400 border border-sky-500/30 text-center";
+            }
+
+            updateCard("sdv", current.SDV, getLevelDesc("SDV", current.SDV));
+            updateCard("vdv", current.VDV, getLevelDesc("VDV", current.VDV));
+            updateCard("adv", current.ADV, getLevelDesc("ADV", current.ADV));
+            updateCard("bdv", current.BDV, getLevelDesc("BDV", current.BDV));
+
+            // 更新 ADV 動態風控狀態
+            document.getElementById("advStopLossMode").innerText = advRiskControl.stopLossMode;
+            document.getElementById("advStopLossRule").innerText = advRiskControl.stopLossRule;
+            
+            const tpAlertElem = document.getElementById("advTakeProfitAlert");
+            tpAlertElem.innerText = advRiskControl.takeProfitAlert;
+            if (advRiskControl.action === "EXIT_FULL") {
+                tpAlertElem.className = "text-base font-bold text-rose-400 bg-rose-950/50 p-2 rounded border border-rose-500/50 animate-pulse";
+            } else {
+                tpAlertElem.className = "text-sm font-semibold text-emerald-400";
+            }
+
+            const tbody = document.getElementById("deltaMatrixBody");
+            tbody.innerHTML = `
+                ${renderRow("SDV (股價離差)", current.SDV, delta.SDV_1, delta.SDV_5, delta.SDV_10)}
+                ${renderRow("VDV (量能離差)", current.VDV, delta.VDV_1, delta.VDV_5, delta.VDV_10)}
+                ${renderRow("ADV (波動離差)", current.ADV, delta.ADV_1, delta.ADV_5, delta.ADV_10)}
+                ${renderRow("BDV (帶寬離差)", current.BDV, delta.BDV_1, delta.BDV_5, delta.BDV_10)}
+            `;
+        }
+
+        function updateCard(type, val, desc) {
+            document.getElementById(`${type}Value`).innerText = val.toFixed(1);
+            document.getElementById(`${type}Status`).innerText = desc;
+        }
+
+        function renderRow(label, curr, d1, d5, d10) {
+            const formatD = (val) => {
+                const color = val > 0 ? "text-rose-400" : val < 0 ? "text-emerald-400" : "text-slate-400";
+                const sign = val > 0 ? "+" : "";
+                return `<span class="${color}">${sign}${val.toFixed(1)}</span>`;
+            };
+            return `
+                <tr class="hover:bg-slate-700/30 transition">
+                    <td class="p-3 text-left font-bold text-slate-300">${label}</td>
+                    <td class="p-3 font-bold">${curr.toFixed(1)}</td>
+                    <td class="p-3">${formatD(d1)}</td>
+                    <td class="p-3">${formatD(d5)}</td>
+                    <td class="p-3">${formatD(d10)}</td>
+                </tr>
+            `;
+        }
+
+        function getLevelDesc(type, val) {
+            if (val >= 70) return "≥70 極致超買/暴甩頂點";
+            if (val >= 60) return "60~69 強勢延伸/放量擴張";
+            if (val >= 50) return "50~59 中性偏多/溫和控盤";
+            if (val >= 40) return "40~49 中性偏空/收斂整理";
+            if (val >= 30) return "30~39 空頭強勢/高度擠壓";
+            return "<30 極致超賣/Squeeze臨界";
+        }
+
+        // 頁面初次載入時自動分析台積電 (2330)
+        window.onload = () => analyzeStock();
+    </script>
 </body>
 </html>
