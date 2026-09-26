@@ -1,197 +1,168 @@
 /**
- * 台股實時四指標與決策系統 - 量化運算引擎 (quantEngine.js)
- * 功能：對數標準化 T-Score 計算、多週期動能 (Δ1/Δ5/Δ10)、層級共振矩陣判讀、ADV動態移動風控
+ * 台股量化分析系統 - 運算引擎 (quantEngine.js)
+ * 計算 SDV, VDV, ADV, BDV 四指標偏離度與 T-Score 轉化
+ * 評估多週期動能差值 (Delta) 與層級共振決策矩陣
  */
 
 class QuantDecisionEngine {
-    constructor(dataWindow, options = {}) {
-        // 傳入 K 線數據陣列 [{date, open, high, low, close, volume}, ...]
-        this.rawData = dataWindow || [];
-        this.period = options.period || 20; // 滾動基底天數 (預設 20 日)
-        this.initBuffer = 48; // 初始化所需最小歷史窗口
+    constructor(rawDataList) {
+        // 傳入的原始 K 線陣列，至少需要 48+ 筆資料以完成標準化轉化
+        this.rawData = rawDataList || [];
+        this.analysisResults = [];
+        this.initEngine();
     }
 
-    /**
-     * 計算 T-Score 標準化數值
-     * 公式: T = 50 + 10 * ((ln(X) - Mean) / StdDev)
-     */
-    static calculateTScore(series) {
-        if (!series || series.length === 0) return 50;
-        const logValues = series.map(v => Math.log(Math.max(v, 0.0001)));
-        const mean = logValues.reduce((a, b) => a + b, 0) / logValues.length;
-        const variance = logValues.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / (logValues.length - 1 || 1);
-        const stdDev = Math.sqrt(variance) || 0.0001;
+    initEngine() {
+        if (!this.rawData || this.rawData.length < 30) return;
 
-        const lastLogValue = logValues[logValues.length - 1];
-        const zScore = (lastLogValue - mean) / stdDev;
-        const tScore = 50 + 10 * zScore;
+        const period = 20; // 基礎移動平均與標準差週期
+        const metrics = [];
 
-        return Math.min(Math.max(Math.round(tScore * 10) / 10, 0), 100);
-    }
-
-    /**
-     * 計算 ATR (Average True Range)
-     */
-    static calculateATR(dataSlice, period = 14) {
-        if (dataSlice.length < 2) return 1;
-        const trList = [];
-        for (let i = 1; i < dataSlice.length; i++) {
-            const high = dataSlice[i].high;
-            const low = dataSlice[i].low;
-            const prevClose = dataSlice[i - 1].close;
-            const tr = Math.max(
-                high - low,
-                Math.abs(high - prevClose),
-                Math.abs(low - prevClose)
-            );
-            trList.push(tr);
-        }
-        const recentTR = trList.slice(-period);
-        return recentTR.reduce((a, b) => a + b, 0) / recentTR.length;
-    }
-
-    /**
-     * 計算布林帶寬度 (Bollinger Band Width)
-     */
-    static calculateBollingerWidth(prices, period = 20) {
-        const slice = prices.slice(-period);
-        const mean = slice.reduce((a, b) => a + b, 0) / slice.length;
-        const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / (slice.length - 1 || 1);
-        const stdDev = Math.sqrt(variance);
-        return (stdDev * 2) / (mean || 1);
-    }
-
-    /**
-     * 處理完整歷史數據並產出每日 T-Score 與決策矩陣
-     */
-    processPipeline() {
-        if (this.rawData.length < this.initBuffer) {
-            return null;
-        }
-
-        const tScoresHistory = [];
-
-        for (let i = this.period; i < this.rawData.length; i++) {
-            const subData = this.rawData.slice(0, i + 1);
-            const windowData = subData.slice(-this.period);
-            const prices = windowData.map(d => d.close);
-            const volumes = windowData.map(d => d.volume);
-
-            // 1. 計算四大指標原始值並轉成 T-Score
-            const sdv = QuantDecisionEngine.calculateTScore(prices);
-            const vdv = QuantDecisionEngine.calculateTScore(volumes);
-            
-            // ADV (ATR T-Score)
-            const atrValues = [];
-            for (let j = Math.max(15, subData.length - this.period); j < subData.length; j++) {
-                atrValues.push(QuantDecisionEngine.calculateATR(subData.slice(0, j + 1), 14));
+        // 1. 基礎指標計算 (SDV, VDV, ADV, BDV 原始偏離度)
+        for (let i = 0; i < this.rawData.length; i++) {
+            if (i < period - 1) {
+                metrics.push(null);
+                continue;
             }
-            const adv = QuantDecisionEngine.calculateTScore(atrValues);
 
-            // BDV (Band Width T-Score)
-            const bwValues = [];
-            for (let j = Math.max(this.period, subData.length - this.period); j < subData.length; j++) {
-                bwValues.push(QuantDecisionEngine.calculateBollingerWidth(subData.slice(0, j + 1).map(d => d.close), 20));
+            const slice = this.rawData.slice(i - period + 1, i + 1);
+            const current = this.rawData[i];
+
+            // 收盤價與成交量 SMA
+            const closePrices = slice.map(d => d.close);
+            const volumes = slice.map(d => d.volume);
+
+            const maClose = this.average(closePrices);
+            const maVol = this.average(volumes);
+
+            const stdClose = this.standardDeviation(closePrices, maClose);
+            const stdVol = this.standardDeviation(volumes, maVol);
+
+            // SDV & VDV 偏離度
+            const rawSDV = stdClose > 0 ? (current.close - maClose) / stdClose : 0;
+            const rawVDV = stdVol > 0 ? (current.volume - maVol) / stdVol : 0;
+
+            // TR & ATR 計算 (ADV)
+            let trSum = 0;
+            for (let j = i - period + 1; j <= i; j++) {
+                const day = this.rawData[j];
+                const prevClose = j > 0 ? this.rawData[j - 1].close : day.close;
+                const tr = Math.max(
+                    day.high - day.low,
+                    Math.abs(day.high - prevClose),
+                    Math.abs(day.low - prevClose)
+                );
+                trSum += tr;
             }
-            const bdv = QuantDecisionEngine.calculateTScore(bwValues);
+            const atr = trSum / period;
+            const rawADV = current.close > 0 ? (atr / current.close) * 100 : 0;
 
-            const curr = subData[subData.length - 1];
+            // 布林通道寬度 (BDV)
+            const upperBand = maClose + (2 * stdClose);
+            const lowerBand = maClose - (2 * stdClose);
+            const rawBDV = maClose > 0 ? ((upperBand - lowerBand) / maClose) * 100 : 0;
 
-            tScoresHistory.push({
-                date: curr.date,
-                close: curr.close,
-                volume: curr.volume,
-                sdv, vdv, adv, bdv
+            metrics.push({
+                date: current.date,
+                close: current.close,
+                volume: current.volume,
+                rawSDV,
+                rawVDV,
+                rawADV,
+                rawBDV
             });
         }
 
-        // 2. 計算多週期動能差值 (Δ1, Δ5, Δ10) 與決策訊號
-        const fullResults = tScoresHistory.map((item, idx, arr) => {
-            const prev1 = arr[idx - 1] || item;
-            const prev5 = arr[idx - 5] || item;
-            const prev10 = arr[idx - 10] || item;
+        // 2. 滾動 T-Score 標準化轉化 (以 20 日為基準化視窗，Mean=50, SD=10)
+        const computedList = [];
+        for (let i = 0; i < metrics.length; i++) {
+            if (!metrics[i] || i < period * 2) {
+                computedList.push(null);
+                continue;
+            }
 
-            const delta = {
-                sdv: {
-                    d1: Math.round((item.sdv - prev1.sdv) * 10) / 10,
-                    d5: Math.round((item.sdv - prev5.sdv) * 10) / 10,
-                    d10: Math.round((item.sdv - prev10.sdv) * 10) / 10
-                },
-                vdv: {
-                    d1: Math.round((item.vdv - prev1.vdv) * 10) / 10,
-                    d5: Math.round((item.vdv - prev5.vdv) * 10) / 10,
-                    d10: Math.round((item.vdv - prev10.vdv) * 10) / 10
-                },
-                adv: {
-                    d1: Math.round((item.adv - prev1.adv) * 10) / 10,
-                    d5: Math.round((item.adv - prev5.adv) * 10) / 10,
-                    d10: Math.round((item.adv - prev10.adv) * 10) / 10
-                },
-                bdv: {
-                    d1: Math.round((item.bdv - prev1.bdv) * 10) / 10,
-                    d5: Math.round((item.bdv - prev5.bdv) * 10) / 10,
-                    d10: Math.round((item.bdv - prev10.bdv) * 10) / 10
-                }
-            };
+            const windowSlice = metrics.slice(i - period + 1, i + 1).filter(m => m !== null);
+            const curr = metrics[i];
 
-            const decision = this.evaluateDecisionMatrix(item, delta);
+            const sdvT = this.computeTScore(curr.rawSDV, windowSlice.map(m => m.rawSDV));
+            const vdvT = this.computeTScore(curr.rawVDV, windowSlice.map(m => m.rawVDV));
+            const advT = this.computeTScore(curr.rawADV, windowSlice.map(m => m.rawADV));
+            const bdvT = this.computeTScore(curr.rawBDV, windowSlice.map(m => m.rawBDV));
 
-            return {
-                ...item,
-                delta,
-                decision
-            };
-        });
-
-        return fullResults;
-    }
-
-    /**
-     * 層級共振矩陣 (Resonance Matrix) 與系統決策判讀
-     */
-    evaluateDecisionMatrix(item, delta) {
-        const { sdv, vdv, adv, bdv } = item;
-        
-        // 1. 特殊極限風險警示 (ADV 極致爆發拐點)
-        const isTakeProfitTriggered = (sdv >= 65 && adv >= 70 && delta.adv.d1 <= -3.0);
-        
-        // 2. 共振條件判讀
-        const isPrimaryBull = (sdv >= 55 && vdv >= 55); // 價量雙強
-        const isPrimaryBear = (sdv <= 45 && vdv <= 45); // 價量同步空頭
-        const isVolatilityExpanded = (adv >= 60 || bdv >= 60); // 波動拉開
-
-        let signalType = "HOLD"; // BUY | SELL | WARN | HOLD
-        let badgeText = "觀望 / 趨勢整理";
-        let desc = "當前四指標位階均勻，未出現明顯方向性共振。";
-
-        if (isTakeProfitTriggered) {
-            signalType = "WARN";
-            badgeText = "⚠️ 極致爆發拐點 (建議移動停利)";
-            desc = "高價位搭配波動度急遽回落 (Δ₁ADV ≤ -3.0)，動能有衰竭可能，強烈建議啟動移動停利。";
-        } else if (isPrimaryBull && isVolatilityExpanded && delta.sdv.d1 > 0) {
-            signalType = "BUY";
-            badgeText = "🚀 強勢共振進場 (加碼 / 持股)";
-            desc = "價格與資金強度同步向上突破 (SDV & VDV ≥ 55)，且波動張力擴展，屬於標準趨勢起漲訊號。";
-        } else if (isPrimaryBear && isVolatilityExpanded) {
-            signalType = "SELL";
-            badgeText = "📉 空頭結構成型 (避險 / 減碼)";
-            desc = "價量同步轉弱 (SDV & VDV ≤ 45) 且波動風險擴大，建議嚴格執行風控或降碼。";
-        } else if (sdv >= 65 && vdv < 45) {
-            signalType = "WARN";
-            badgeText = "⚠️ 價量背離 (高檔量縮)";
-            desc = "股價處於偏高位階但資金強度不支，短線隨時有回檔整理風險。";
+            computedList.push({
+                date: curr.date,
+                close: curr.close,
+                volume: curr.volume,
+                sdv: sdvT,
+                vdv: vdvT,
+                adv: advT,
+                bdv: bdvT
+            });
         }
 
-        // 風控模式設定 (ADV Dynamic Stop Loss)
-        let stopLossMode = "常態移動風控 (MA20 / 3%)";
-        let stopLossRule = "使用標準 20 日移動平均線或歷史高點回撤 3% 進行停損控管。";
+        // 3. 多週期 Δ 動能與層級共振決策矩陣
+        for (let i = 0; i < computedList.length; i++) {
+            const curr = computedList[i];
+            if (!curr) continue;
 
-        if (adv >= 65) {
-            stopLossMode = "🔥 寬幅高波動模式 (ATR 雙倍風控)";
-            stopLossRule = "因當前環境 ADV ≥ 65，波動劇烈，建議放寬停損距離至 2.5 倍 ATR，避免被雜訊洗出場。";
-        } else if (adv <= 35) {
-            stopLossMode = "❄️ 低波動緊密模式 (1.5% 嚴格停損)";
-            stopLossRule = "環境處於極度壓縮狀態 (ADV ≤ 35)，建議採用緊密停損 (1.5%)，防範突發性向下變盤。";
+            const getPrev = (offset) => (i - offset >= 0 && computedList[i - offset]) ? computedList[i - offset] : curr;
+            const prev1 = getPrev(1);
+            const prev5 = getPrev(5);
+            const prev10 = getPrev(10);
+
+            const delta = {
+                sdv: { d1: curr.sdv - prev1.sdv, d5: curr.sdv - prev5.sdv, d10: curr.sdv - prev10.sdv },
+                vdv: { d1: curr.vdv - prev1.vdv, d5: curr.vdv - prev5.vdv, d10: curr.vdv - prev10.vdv },
+                adv: { d1: curr.adv - prev1.adv, d5: curr.adv - prev5.adv, d10: curr.adv - prev10.adv },
+                bdv: { d1: curr.bdv - prev1.bdv, d5: curr.bdv - prev5.bdv, d10: curr.bdv - prev10.bdv }
+            };
+
+            const decision = this.evaluateDecisionMatrix(curr, delta);
+
+            this.analysisResults.push({
+                date: curr.date,
+                close: curr.close,
+                volume: curr.volume,
+                sdv: curr.sdv,
+                vdv: curr.vdv,
+                adv: curr.adv,
+                bdv: curr.bdv,
+                delta,
+                decision
+            });
+        }
+    }
+
+    // 評估層級共振矩陣
+    evaluateDecisionMatrix(curr, delta) {
+        const { sdv, vdv, adv, bdv } = curr;
+        let signalType = "NEUTRAL"; // BUY | SELL | WARN | NEUTRAL
+        let badgeText = "觀望 / 常態整理";
+        let desc = "當前四指標位於中性常態區間，價格動能尚未形成明確共振突破，建議保持觀望。";
+        let stopLossMode = "標準移動防守";
+        let stopLossRule = "近 10 日低點或收盤跌破 MA20 停損";
+        let isTakeProfitTriggered = false;
+
+        // 突破 / 買入共振號誌
+        if (sdv >= 55 && vdv >= 55 && delta.sdv.d1 > 0 && delta.vdv.d1 > 0) {
+            signalType = "BUY";
+            badgeText = "🟢 價量共振多頭突破";
+            desc = "價格位階 (SDV) 與資金強度 (VDV)同步向上突破 55 強勢區，具備明確價量多頭共振，可順勢佈局。";
+        } 
+        // 高位警戒 / 停利號誌
+        else if (sdv >= 65 || (adv >= 65 && bdv >= 65)) {
+            signalType = "WARN";
+            badgeText = "⚠️ 波動過熱 / 爆發拐點";
+            desc = "風險環境 (ADV) 與週期張力 (BDV) 達極高位階，市場波動劇烈，隨時可能迎來行情反轉或震盪，切勿追高。";
+            isTakeProfitTriggered = true;
+        } 
+        // 轉弱 / 賣出號誌
+        else if (sdv <= 40 && delta.sdv.d5 < -5) {
+            signalType = "SELL";
+            badgeText = "🔴 弱勢空頭格局";
+            desc = "SDV 位階過低且 5 日動能持續衰退，資金流出顯著，建議執行減碼或避險操作。";
+            stopLossMode = "嚴格緊縮防守";
+            stopLossRule = "破前日低點即時停損離場";
         }
 
         return {
@@ -204,24 +175,31 @@ class QuantDecisionEngine {
         };
     }
 
-    /**
-     * 取得最新計算結果與近 6 個月歷史紀錄
-     */
-    getLatestAnalysis() {
-        const processed = this.processPipeline();
-        if (!processed || processed.length === 0) return null;
-
-        const latest = processed[processed.length - 1];
-        const history6M = processed.slice(-130); // 取得約近 130 個交易日 (6個月)
-
-        return {
-            latest,
-            history6M
-        };
+    computeTScore(val, list) {
+        if (!list || list.length === 0) return 50;
+        const mean = this.average(list);
+        const sd = this.standardDeviation(list, mean);
+        if (sd === 0) return 50;
+        const t = 50 + 10 * ((val - mean) / sd);
+        return Math.min(100, Math.max(0, Math.round(t)));
     }
-}
 
-// 支援瀏覽器全域環境
-if (typeof window !== 'undefined') {
-    window.QuantDecisionEngine = QuantDecisionEngine;
+    average(arr) {
+        if (arr.length === 0) return 0;
+        return arr.reduce((a, b) => a + b, 0) / arr.length;
+    }
+
+    standardDeviation(arr, mean) {
+        if (arr.length <= 1) return 0;
+        const m = mean !== undefined ? mean : this.average(arr);
+        const variance = arr.reduce((sum, val) => sum + Math.pow(val - m, 2), 0) / arr.length;
+        return Math.sqrt(variance);
+    }
+
+    getLatestAnalysis() {
+        if (this.analysisResults.length === 0) return null;
+        const latest = this.analysisResults[this.analysisResults.length - 1];
+        const history6M = this.analysisResults.slice(-120); // 取近 120 個交易日 (約 6 個月)
+        return { latest, history6M };
+    }
 }

@@ -4,7 +4,7 @@
 
 const GAS_API_URL = (typeof window !== 'undefined' && window.GAS_API_URL) 
     ? window.GAS_API_URL 
-    : "https://script.google.com/macros/s/AKfycbw0aLFtVlWNgFjxxiYMZZEIyE7nDFc_Lkpp6Eo_gdzuL1gtLydSSrQ53GN6jQvVCBOC/exec";
+    : "https://script.google.com/macros/s/AKfycbx69HynfFUSdL5PpmUN6dxrU7K66Ms__wsQpwfLrrF6aCWS6jHuanv62O0LL6jCapfm/exec";
 
 // 頁面載入後自動執行 2330 初始化分析
 document.addEventListener("DOMContentLoaded", () => {
@@ -81,19 +81,18 @@ function updateUI(analysisResult, isBefore9AM = false) {
 
     if (signalBadge) {
         signalBadge.innerText = decision.badgeText;
-        // 根據訊號類型改變樣式
         signalBadge.className = "w-full py-2.5 px-3 rounded-lg border font-medium text-xs md:text-sm text-center tracking-wide " + getSignalBadgeStyle(decision.signalType);
     }
     if (cardSignal) {
-        cardSignal.className = "bg-[#151e2e] p-5 rounded-xl border-2 flex flex-col justify-between shadow-lg min-h-[160px] " + getSignalBorderStyle(decision.signalType);
+        cardSignal.className = "bg-[#151e2e] p-5 rounded-xl border-2 flex flex-col justify-between shadow-lg min-h-[160px] lg:col-span-2 " + getSignalBorderStyle(decision.signalType);
     }
     if (decisionDesc) decisionDesc.innerText = decision.desc;
 
     // 3. 四指標 T-Score 卡片
-    renderMetricCard("sdv", sdv, delta.sdv.d1, "價格位階");
-    renderMetricCard("vdv", vdv, delta.vdv.d1, "資金強度");
-    renderMetricCard("adv", adv, delta.adv.d1, "風險環境");
-    renderMetricCard("bdv", bdv, delta.bdv.d1, "週期張力");
+    renderMetricCard("sdv", sdv, delta.sdv.d1);
+    renderMetricCard("vdv", vdv, delta.vdv.d1);
+    renderMetricCard("adv", adv, delta.adv.d1);
+    renderMetricCard("bdv", bdv, delta.bdv.d1);
 
     // 4. ADV 風控樞紐
     const advStopLossMode = document.getElementById("advStopLossMode");
@@ -105,10 +104,10 @@ function updateUI(analysisResult, isBefore9AM = false) {
     if (advTakeProfitAlert) {
         if (decision.isTakeProfitTriggered) {
             advTakeProfitAlert.innerText = "🚨 觸發情緒爆發拐點！建議啟動移動停利！";
-            advTakeProfitAlert.className = "text-sm font-bold text-rose-400 animate-pulse";
+            advTakeProfitAlert.className = "text-xs font-bold text-rose-400 animate-pulse";
         } else {
             advTakeProfitAlert.innerText = "常態監控中";
-            advTakeProfitAlert.className = "text-sm font-semibold text-emerald-400";
+            advTakeProfitAlert.className = "text-xs font-semibold text-emerald-400";
         }
     }
 
@@ -122,7 +121,7 @@ function updateUI(analysisResult, isBefore9AM = false) {
 /**
  * 輔助繪製單一指標 T-Score 卡片
  */
-function renderMetricCard(idPrefix, val, d1Val, labelName) {
+function renderMetricCard(idPrefix, val, d1Val) {
     const valElem = document.getElementById(`${idPrefix}Value`);
     const statusElem = document.getElementById(`${idPrefix}Status`);
     if (!valElem || !statusElem) return;
@@ -159,11 +158,11 @@ function renderDeltaMatrix(latest) {
         const d = latest.delta[m.key];
         return `
             <tr class="hover:bg-slate-800/40 transition">
-                <td class="p-3 text-left font-sans font-medium text-slate-300">${m.name}</td>
-                <td class="p-3 font-bold text-white">${m.val}</td>
-                <td class="p-3 ${getDeltaColor(d.d1)}">${formatDelta(d.d1)}</td>
-                <td class="p-3 ${getDeltaColor(d.d5)}">${formatDelta(d.d5)}</td>
-                <td class="p-3 ${getDeltaColor(d.d10)}">${formatDelta(d.d10)}</td>
+                <td class="p-2.5 text-left font-medium text-slate-300">${m.name}</td>
+                <td class="p-2.5 font-bold text-white">${m.val}</td>
+                <td class="p-2.5 ${getDeltaColor(d.d1)}">${formatDelta(d.d1)}</td>
+                <td class="p-2.5 ${getDeltaColor(d.d5)}">${formatDelta(d.d5)}</td>
+                <td class="p-2.5 ${getDeltaColor(d.d10)}">${formatDelta(d.d10)}</td>
             </tr>
         `;
     }).join("");
@@ -199,7 +198,7 @@ function renderHistorySignals(historyList) {
 
         // 左欄
         html += `
-            <td class="p-2.5 text-slate-400 text-xs">${left.date}</td>
+            <td class="p-2.5 text-slate-400 text-xs text-left">${left.date}</td>
             <td class="p-2.5 text-slate-200 font-bold">${left.close}</td>
             <td class="p-2.5">${getBadgeTagHtml(left.decision.signalType, left.decision.badgeText)}</td>
         `;
@@ -207,7 +206,7 @@ function renderHistorySignals(historyList) {
         // 右欄
         if (right) {
             html += `
-                <td class="p-2.5 text-slate-400 text-xs border-l border-slate-700/60">${right.date}</td>
+                <td class="p-2.5 text-slate-400 text-xs text-left border-l border-slate-700/60">${right.date}</td>
                 <td class="p-2.5 text-slate-200 font-bold">${right.close}</td>
                 <td class="p-2.5">${getBadgeTagHtml(right.decision.signalType, right.decision.badgeText)}</td>
             `;

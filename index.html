@@ -1,178 +1,208 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="zh-TW" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>台股實時四指標與決策系統</title>
-    <!-- 引入 Tailwind CSS -->
+    <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // 設定新的 GAS API 網址
+        window.GAS_API_URL = "https://script.google.com/macros/s/AKfycbx69HynfFUSdL5PpmUN6dxrU7K66Ms__wsQpwfLrrF6aCWS6jHuanv62O0LL6jCapfm/exec";
+    </script>
 </head>
-<body class="bg-[#0b1320] text-slate-100 min-h-screen p-4 md:p-8 font-sans">
+<body class="bg-[#0b0f17] text-slate-100 min-h-screen font-sans antialiased pb-12">
 
-    <div class="max-w-7xl mx-auto space-y-6">
-        
-        <!-- Header & 搜尋欄 -->
-        <header class="flex flex-col md:flex-row justify-between items-center bg-[#151e2e] p-6 rounded-xl border border-slate-700/60 shadow-lg gap-4">
-            <div>
-                <h1 class="text-2xl font-bold text-sky-400">台股實時四指標與系統決策矩陣</h1>
-                <p class="text-xs text-slate-400 mt-1">對數標準化 (T-Score) + 多週期動能 (Δ₁ / Δ₅ / Δ₁₀) + ADV 動態移動風控</p>
+    <!-- 頂部導覽欄 -->
+    <header class="border-b border-slate-800 bg-[#111827]/80 backdrop-blur sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center space-x-3">
+                <div class="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center font-black text-xl text-white shadow-lg shadow-indigo-500/30">
+                    Q
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold tracking-wide text-white">台股量化共振決策系統</h1>
+                    <p class="text-xs text-slate-400">SDV / VDV / ADV / BDV 偏離度量化引擎</p>
+                </div>
             </div>
-            
-            <div class="flex items-center space-x-2 w-full md:w-auto">
-                <input type="text" id="stockInput" value="2330" placeholder="輸入台股代碼 (如 2330)" 
-                       class="bg-[#0b1320] border border-slate-600 px-4 py-2 rounded-lg text-white font-mono focus:outline-none focus:border-sky-500 w-full md:w-48">
-                <button onclick="analyzeStock()" 
-                        class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded-lg font-bold transition text-white whitespace-nowrap">
+
+            <!-- 股票查詢列 -->
+            <div class="flex items-center space-x-2 w-full sm:w-auto">
+                <div class="relative flex-1 sm:w-48">
+                    <input type="text" id="stockInput" value="2330" placeholder="輸入台股代碼 (例: 2330)" 
+                           class="w-full bg-slate-900 border border-slate-700 focus:border-indigo-500 text-white text-sm rounded-lg px-3.5 py-2 outline-none transition uppercase">
+                </div>
+                <button onclick="analyzeStock()" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition flex items-center shadow-md shadow-indigo-600/20 active:scale-95">
                     實時分析
                 </button>
             </div>
-        </header>
+        </div>
+    </header>
 
-        <!-- 4-Card 資訊摘要區 -->
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <!-- 方框 1：代碼與名稱 -->
-            <div class="bg-[#151e2e] p-5 rounded-xl border border-slate-700/60 flex flex-col justify-between shadow-lg min-h-[160px]">
+    <!-- 主內容區 -->
+    <main class="max-w-7xl mx-auto px-4 pt-6 space-y-6">
+
+        <!-- 頂部資訊看板 -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            
+            <!-- 個股基本資料卡片 -->
+            <div class="bg-[#151e2e] p-5 rounded-xl border border-slate-800/80 flex flex-col justify-between shadow-lg">
                 <div id="stockTitle">
                     <div class="text-2xl font-bold text-white tracking-wide">2330</div>
-                    <div class="text-xs text-slate-300 mt-1.5 leading-snug font-normal">
-                        Taiwan Semiconductor<br>Manufacturing Co Ltd
+                    <div class="text-xs text-slate-300 mt-1.5 leading-snug font-normal">TSMC (Taiwan Semiconductor)</div>
+                </div>
+                <div class="mt-4 pt-3 border-t border-slate-800 grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                        <span id="priceLabel" class="text-xs text-slate-400 block">價格行情</span>
+                        <span id="stockPrice" class="text-xl font-bold text-slate-100">--</span>
+                    </div>
+                    <div>
+                        <span id="volumeLabel" class="text-xs text-slate-400 block">成交張數</span>
+                        <span id="stockVolume" class="text-xl font-bold text-slate-100">--</span>
                     </div>
                 </div>
-                <p id="decisionDesc" class="text-xs text-slate-400 mt-4 leading-relaxed border-t border-slate-800 pt-3">
-                    系統初始化中...
-                </p>
             </div>
 
-            <!-- 方框 2：股價 -->
-            <div class="bg-[#151e2e] p-5 rounded-xl border border-slate-700/60 flex flex-col justify-between shadow-lg min-h-[160px]">
-                <div id="priceLabel" class="text-xs font-medium text-slate-400">當日 (T) 即時股價</div>
-                <div id="stockPrice" class="text-3xl font-extrabold font-mono text-emerald-400 my-auto">NT$ --</div>
-                <div class="text-[10px] text-transparent">spacing</div>
-            </div>
-
-            <!-- 方框 3：成交量 -->
-            <div class="bg-[#151e2e] p-5 rounded-xl border border-slate-700/60 flex flex-col justify-between shadow-lg min-h-[160px]">
-                <div id="volumeLabel" class="text-xs font-medium text-slate-400">當日 (T) 即時成交量</div>
-                <div id="stockVolume" class="text-3xl font-extrabold font-mono text-sky-400 my-auto">-- 張</div>
-                <div class="text-[10px] text-transparent">spacing</div>
-            </div>
-
-            <!-- 方框 4：系統決策訊號 -->
-            <div id="cardSignal" class="bg-[#151e2e] p-5 rounded-xl border-2 border-sky-500 flex flex-col justify-between shadow-lg min-h-[160px]">
-                <div class="text-xs font-medium text-slate-400">當前系統決策訊號</div>
-                <div class="my-auto">
-                    <div id="signalBadge" class="w-full py-2.5 px-3 rounded-lg border border-sky-500/50 bg-sky-500/10 text-sky-300 text-xs md:text-sm font-medium text-center tracking-wide">
-                        計算中...
+            <!-- 系統量化決策卡片 -->
+            <div id="cardSignal" class="bg-[#151e2e] p-5 rounded-xl border-2 border-sky-500/60 flex flex-col justify-between shadow-lg min-h-[160px] lg:col-span-2">
+                <div>
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xs font-semibold text-slate-400 tracking-wider uppercase">共振矩陣決策號誌</span>
+                        <span id="signalBadge" class="py-1 px-3 rounded-lg border font-medium text-xs border-sky-500/50 bg-sky-500/10 text-sky-300">
+                            系統初始化中
+                        </span>
                     </div>
+                    <p id="decisionDesc" class="text-sm text-slate-300 leading-relaxed mt-2">
+                        正在連線抓取行情數據與計算決策矩陣...
+                    </p>
                 </div>
-                <div class="text-[10px] text-transparent">spacing</div>
+                <div class="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
+                    <span>訊號過濾機制：動能極值與風險樞紐二重鎖定</span>
+                    <span>狀態：運作中</span>
+                </div>
             </div>
         </div>
 
-        <!-- 四指標 T-Score 現況 -->
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div class="bg-[#151e2e] p-5 rounded-xl border border-slate-700/60">
-                <div class="text-xs font-bold text-slate-400 mb-1">價格位階 (SDV)</div>
-                <div id="sdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
-                <div id="sdvStatus" class="text-xs mt-2 text-slate-400">--</div>
-            </div>
+        <!-- 四指標 T-Score 現況卡片 -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
             
-            <div class="bg-[#151e2e] p-5 rounded-xl border border-slate-700/60">
-                <div class="text-xs font-bold text-slate-400 mb-1">資金強度 (VDV)</div>
-                <div id="vdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
-                <div id="vdvStatus" class="text-xs mt-2 text-slate-400">--</div>
+            <!-- SDV -->
+            <div class="bg-[#151e2e] p-4 rounded-xl border border-slate-800">
+                <div class="text-xs text-slate-400 mb-1">價格位階 (SDV)</div>
+                <div class="flex items-baseline justify-between">
+                    <span id="sdvValue" class="text-2xl font-black text-white">--</span>
+                    <span class="text-[10px] text-slate-500">T-Score</span>
+                </div>
+                <div id="sdvStatus" class="text-xs text-slate-400 mt-2">狀態：計算中...</div>
             </div>
 
-            <div class="bg-[#151e2e] p-5 rounded-xl border border-slate-700/60">
-                <div class="text-xs font-bold text-slate-400 mb-1">風險環境 (ADV)</div>
-                <div id="advValue" class="text-4xl font-extrabold font-mono text-white">--</div>
-                <div id="advStatus" class="text-xs mt-2 text-slate-400">--</div>
+            <!-- VDV -->
+            <div class="bg-[#151e2e] p-4 rounded-xl border border-slate-800">
+                <div class="text-xs text-slate-400 mb-1">資金強度 (VDV)</div>
+                <div class="flex items-baseline justify-between">
+                    <span id="vdvValue" class="text-2xl font-black text-white">--</span>
+                    <span class="text-[10px] text-slate-500">T-Score</span>
+                </div>
+                <div id="vdvStatus" class="text-xs text-slate-400 mt-2">狀態：計算中...</div>
             </div>
 
-            <div class="bg-[#151e2e] p-5 rounded-xl border border-slate-700/60">
-                <div class="text-xs font-bold text-slate-400 mb-1">週期張力 (BDV)</div>
-                <div id="bdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
-                <div id="bdvStatus" class="text-xs mt-2 text-slate-400">--</div>
+            <!-- ADV -->
+            <div class="bg-[#151e2e] p-4 rounded-xl border border-slate-800">
+                <div class="text-xs text-slate-400 mb-1">風險環境 (ADV)</div>
+                <div class="flex items-baseline justify-between">
+                    <span id="advValue" class="text-2xl font-black text-white">--</span>
+                    <span class="text-[10px] text-slate-500">T-Score</span>
+                </div>
+                <div id="advStatus" class="text-xs text-slate-400 mt-2">狀態：計算中...</div>
+            </div>
+
+            <!-- BDV -->
+            <div class="bg-[#151e2e] p-4 rounded-xl border border-slate-800">
+                <div class="text-xs text-slate-400 mb-1">週期張力 (BDV)</div>
+                <div class="flex items-baseline justify-between">
+                    <span id="bdvValue" class="text-2xl font-black text-white">--</span>
+                    <span class="text-[10px] text-slate-500">T-Score</span>
+                </div>
+                <div id="bdvStatus" class="text-xs text-slate-400 mt-2">狀態：計算中...</div>
             </div>
         </div>
 
-        <!-- ADV 波動度風控區塊 -->
-        <div class="bg-[#151e2e] p-6 rounded-xl border border-sky-500/30 shadow-xl space-y-4">
-            <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
-                <h3 class="text-lg font-bold text-sky-400 flex items-center gap-2">
-                    🛡️ ADV 波動度驅動之動態移動風控樞紐 (Trailing Risk Control)
-                </h3>
-                <span class="text-xs px-2.5 py-1 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/20">適應型移動風控</span>
+        <!-- 中間區塊：風控樞紐與 Δ 動能矩陣 -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- ADV 風險風控卡片 -->
+            <div class="bg-[#151e2e] p-5 rounded-xl border border-slate-800 flex flex-col justify-between">
+                <div>
+                    <h3 class="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-amber-400"></span> ADV 風控動態樞紐
+                    </h3>
+                    <div class="space-y-3 text-xs">
+                        <div class="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                            <span class="text-slate-400 block mb-1">風控模式</span>
+                            <span id="advStopLossMode" class="font-semibold text-slate-200">--</span>
+                        </div>
+                        <div class="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                            <span class="text-slate-400 block mb-1">防守 / 停損規則</span>
+                            <span id="advStopLossRule" class="font-semibold text-slate-200">--</span>
+                        </div>
+                        <div class="bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                            <span class="text-slate-400 block mb-1">停利爆發監控</span>
+                            <span id="advTakeProfitAlert" class="font-semibold text-emerald-400">常態監控中</span>
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="bg-[#0b1320]/60 p-4 rounded-lg border border-slate-700/80">
-                    <div class="text-xs text-slate-400 mb-1">當前 ADV 停損模式 (Dynamic Stop-Loss)</div>
-                    <div id="advStopLossMode" class="text-base font-bold text-amber-400">--</div>
-                    <div id="advStopLossRule" class="text-xs text-slate-300 mt-2 leading-relaxed">--</div>
-                </div>
-
-                <div class="bg-[#0b1320]/60 p-4 rounded-lg border border-slate-700/80">
-                    <div class="text-xs text-slate-400 mb-1">極致爆發移動停利監控 (Trailing Take-Profit)</div>
-                    <div id="advTakeProfitAlert" class="text-sm font-semibold text-emerald-400">常態監控中</div>
-                    <div class="text-xs text-slate-400 mt-2">觸發條件：SDV ≥ 65 & ADV ≥ 70 且 Δ₁ADV ≤ -3.0 (情緒爆發拐點出場)</div>
+            <!-- Δ 動能差值矩陣表格 -->
+            <div class="bg-[#151e2e] p-5 rounded-xl border border-slate-800 lg:col-span-2">
+                <h3 class="text-sm font-bold text-white mb-3">多週期 Δ 動能矩陣 (Momentum Delta)</h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs text-center border-collapse">
+                        <thead>
+                            <tr class="border-b border-slate-800 text-slate-400">
+                                <th class="p-2.5 text-left">指標項目</th>
+                                <th class="p-2.5">當前 T-Score</th>
+                                <th class="p-2.5">Δ₁ (1日動能)</th>
+                                <th class="p-2.5">Δ₅ (5日動能)</th>
+                                <th class="p-2.5">Δ₁₀ (10日動能)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="deltaMatrixBody" class="divide-y divide-slate-800/50">
+                            <tr><td colspan="5" class="p-4 text-slate-500">等待資料載入...</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
 
-        <!-- Δ 動能矩陣區塊 -->
-        <div class="bg-[#151e2e] p-6 rounded-xl border border-slate-700/60 shadow-lg">
-            <h3 class="text-lg font-bold text-slate-200 mb-4">多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)</h3>
+        <!-- 歷史 6 個月決策紀錄 -->
+        <div class="bg-[#151e2e] p-5 rounded-xl border border-slate-800">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-sm font-bold text-white">歷史 6 個月共振訊號紀錄</h3>
+                <span id="historyCountTag" class="text-xs text-slate-400">--</span>
+            </div>
             <div class="overflow-x-auto">
-                <table class="w-full text-center text-sm border-collapse">
+                <table class="w-full text-xs text-center border-collapse">
                     <thead>
-                        <tr class="bg-[#0b1320]/80 text-slate-400 border-b border-slate-700">
-                            <th class="p-3 text-left">指標類型</th>
-                            <th class="p-3">當前 T-Score</th>
-                            <th class="p-3">Δ₁ (單日動能)</th>
-                            <th class="p-3">Δ₅ (短線動能)</th>
-                            <th class="p-3">Δ₁₀ (中線結構)</th>
+                        <tr class="border-b border-slate-800 text-slate-400">
+                            <th class="p-2.5 text-left">日期</th>
+                            <th class="p-2.5">收盤價</th>
+                            <th class="p-2.5">決策訊號</th>
+                            <th class="p-2.5 text-left border-l border-slate-700/60">日期</th>
+                            <th class="p-2.5">收盤價</th>
+                            <th class="p-2.5">決策訊號</th>
                         </tr>
                     </thead>
-                    <tbody id="deltaMatrixBody" class="divide-y divide-slate-700/50 font-mono">
-                        <tr><td colspan="5" class="p-4 text-slate-500">尚無資料</td></tr>
+                    <tbody id="historyMatrixBody" class="divide-y divide-slate-800/50">
+                        <tr><td colspan="6" class="p-4 text-slate-500">等待資料載入...</td></tr>
                     </tbody>
                 </table>
             </div>
         </div>
 
-        <!-- 歷史系統決策訊號 (近6個月) 區塊 -->
-        <div class="bg-[#151e2e] p-6 rounded-xl border border-slate-700/60 shadow-lg space-y-4">
-            <div class="flex justify-between items-center">
-                <h3 class="text-lg font-bold text-slate-200">歷史系統決策與關鍵轉折紀錄 (近 6 個月)</h3>
-                <span id="historyCountTag" class="text-xs text-slate-400">分析中...</span>
-            </div>
-            
-            <div class="overflow-x-auto">
-                <table class="w-full text-center text-sm border-collapse">
-                    <thead>
-                        <tr class="bg-[#0b1320]/80 text-slate-400 border-b border-slate-700">
-                            <th class="p-3 font-semibold">日期</th>
-                            <th class="p-3 font-semibold">收盤價</th>
-                            <th class="p-3 font-semibold">決策 / 關鍵訊號</th>
-                            <th class="p-3 font-semibold border-l border-slate-700/60">日期</th>
-                            <th class="p-3 font-semibold">收盤價</th>
-                            <th class="p-3 font-semibold">決策 / 關鍵訊號</th>
-                        </tr>
-                    </thead>
-                    <tbody id="historyMatrixBody" class="divide-y divide-slate-700/50 font-mono">
-                        <tr><td colspan="6" class="p-4 text-slate-500">載入歷史訊號中...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
+    </main>
 
-    </div>
-
-    <!-- 腳本區域：指向更新後的正式檔名 -->
-    <script>
-        window.GAS_API_URL = "https://script.google.com/macros/s/AKfycbw0aLFtVlWNgFjxxiYMZZEIyE7nDFc_Lkpp6Eo_gdzuL1gtLydSSrQ53GN6jQvVCBOC/exec";
-    </script>
+    <!-- 載入腳本 -->
     <script src="quantEngine.js"></script>
     <script src="main.js"></script>
 </body>
