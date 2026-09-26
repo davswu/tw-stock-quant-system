@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>台股實時四指標與決策系統</title>
+    <!-- 引入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-[#0b1320] text-slate-100 min-h-screen p-4 md:p-8 font-sans">
@@ -27,7 +28,7 @@
             </div>
         </header>
 
-        <!-- 4-Card 方框區 -->
+        <!-- 4-Card 資訊摘要區 -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
             <!-- 方框 1：代碼與名稱 -->
             <div class="bg-[#151e2e] p-5 rounded-xl border border-slate-700/60 flex flex-col justify-between shadow-lg min-h-[160px]">
@@ -140,7 +141,7 @@
             </div>
         </div>
 
-        <!-- 歷史系統決策訊號 (6個月內) 區塊 -->
+        <!-- 歷史系統決策訊號 (近6個月) 區塊 -->
         <div class="bg-[#151e2e] p-6 rounded-xl border border-slate-700/60 shadow-lg space-y-4">
             <div class="flex justify-between items-center">
                 <h3 class="text-lg font-bold text-slate-200">歷史系統決策與關鍵轉折紀錄 (近 6 個月)</h3>
@@ -168,7 +169,11 @@
 
     </div>
 
-    <!-- 引入模組化 JavaScript 腳本 -->
+    <!-- 腳本區域：注入配置與核心邏輯 -->
+    <script>
+        // 後端 Google Apps Script API URL 配置
+        window.GAS_API_URL = "https://script.google.com/macros/s/AKfycbw0aLFtVlWNgFjxxiYMZZEIyE7nDFc_Lkpp6Eo_gdzuL1gtLydSSrQ53GN6jQvVCBOC/exec";
+    </script>
     <script src="quantEngine.js"></script>
     <script src="main.js"></script>
 </body>

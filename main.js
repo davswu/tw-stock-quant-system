@@ -1,21 +1,34 @@
-const GAS_API_URL = "https://script.google.com/macros/s/AKfycbw0aLFtVlWNgFjxxiYMZZEIyE7nDFc_Lkpp6Eo_gdzuL1gtLydSSrQ53GN6jQvVCBOC/exec";
+/**
+ * 台股實時四指標與決策系統 - 主介面與 UI 渲染邏輯 (main.js)
+ */
 
+// 優先讀取 index.html 設定的全域 GAS_API_URL，若未設定則使用預設值
+const GAS_API_URL = (typeof window !== 'undefined' && window.GAS_API_URL) 
+    ? window.GAS_API_URL 
+    : "https://script.google.com/macros/s/AKfycbw0aLFtVlWNgFjxxiYMZZEIyE7nDFc_Lkpp6Eo_gdzuL1gtLydSSrQ53GN6jQvVCBOC/exec";
+
+/**
+ * 觸發股票量化分析
+ */
 async function analyzeStock() {
     const codeInput = document.getElementById("stockInput");
     const code = codeInput ? codeInput.value.trim() : "2330";
     if (!code) return;
 
-    document.getElementById("decisionDesc").innerText = "正在連線抓取行情數據與計算決策矩陣...";
+    // UI 設定為載入狀態
+    const descElem = document.getElementById("decisionDesc");
+    if (descElem) descElem.innerText = "正在連線抓取行情數據與計算決策矩陣...";
 
     try {
         const res = await fetch(`${GAS_API_URL}?code=${encodeURIComponent(code)}`);
         const rawData = await res.json();
 
         if (!rawData || rawData.status === "error" || !rawData.data || rawData.data.length === 0) {
-            document.getElementById("decisionDesc").innerText = rawData.message || "無法取得行情資料，請確認台股代碼。";
+            if (descElem) descElem.innerText = rawData.message || "無法取得行情資料，請確認台股代碼。";
             return;
         }
 
+        // 更新股票名稱與代碼
         const titleContainer = document.getElementById("stockTitle");
         if (titleContainer) {
             const engName = rawData.englishName || (code === '2330' ? 'Taiwan Semiconductor<br>Manufacturng Co Ltd' : (rawData.name || ''));
@@ -25,25 +38,31 @@ async function analyzeStock() {
             `;
         }
 
+        // 初始化量化引擎並進行計算
         const engine = new QuantDecisionEngine(rawData.data);
         const result = engine.getLatestAnalysis();
 
         if (!result) {
-            document.getElementById("decisionDesc").innerText = "數據筆數不足，無法完成指標計算。";
+            if (descElem) descElem.innerText = "歷史數據筆數不足，無法完成指標與 T-Score 算術初始化。";
             return;
         }
 
+        // 渲染 UI 畫面
         updateUI(result, rawData.isBefore9AM);
 
     } catch (err) {
         console.error("Fetch Error:", err);
-        document.getElementById("decisionDesc").innerText = "資料連線失敗，請檢查網路連線或 API 狀態。";
+        if (descElem) descElem.innerText = "資料連線失敗，請檢查網路連線或 API 部署狀態。";
     }
 }
 
+/**
+ * 更新整體 UI 畫面
+ */
 function updateUI(res, isBefore9AM) {
     const { current, delta, decision, advRiskControl, historySignals, totalTScoresCount } = res;
 
+    // 1. 股價與成交量標籤更新 (盤前 / 盤中)
     const priceLabel = document.getElementById("priceLabel");
     const volumeLabel = document.getElementById("volumeLabel");
     
@@ -53,6 +72,7 @@ function updateUI(res, isBefore9AM) {
     document.getElementById("stockPrice").innerText = `NT$ ${current.close.toFixed(2)}`;
     document.getElementById("stockVolume").innerText = `${Number(current.volume).toLocaleString()} 張`;
 
+    // 2. 系統決策描述與 Badge 顏色調整
     document.getElementById("decisionDesc").innerText = `${decision.name}：${decision.desc}`;
 
     const badge = document.getElementById("signalBadge");
@@ -71,11 +91,13 @@ function updateUI(res, isBefore9AM) {
         badge.className = "w-full py-2.5 px-3 rounded-lg border border-sky-500/50 bg-sky-500/10 text-sky-300 text-xs md:text-sm font-medium text-center tracking-wide";
     }
 
+    // 3. 四指標 T-Score 卡片更新
     updateCard("sdv", current.SDV, getLevelDesc("SDV", current.SDV));
     updateCard("vdv", current.VDV, getLevelDesc("VDV", current.VDV));
     updateCard("adv", current.ADV, getLevelDesc("ADV", current.ADV));
     updateCard("bdv", current.BDV, getLevelDesc("BDV", current.BDV));
 
+    // 4. ADV 動態移動風控模組更新
     document.getElementById("advStopLossMode").innerText = advRiskControl.stopLossMode;
     document.getElementById("advStopLossRule").innerText = advRiskControl.stopLossRule;
     
@@ -87,7 +109,7 @@ function updateUI(res, isBefore9AM) {
         tpAlertElem.className = "text-sm font-semibold text-emerald-400";
     }
 
-    // 動態矩陣
+    // 5. 動能矩陣 (Δ1 / Δ5 / Δ10) 表格渲染
     const tbody = document.getElementById("deltaMatrixBody");
     tbody.innerHTML = `
         ${renderRow("SDV (股價離差)", current.SDV, delta.SDV_1, delta.SDV_5, delta.SDV_10)}
@@ -96,17 +118,20 @@ function updateUI(res, isBefore9AM) {
         ${renderRow("BDV (帶寬離差)", current.BDV, delta.BDV_1, delta.BDV_5, delta.BDV_10)}
     `;
 
-    // 歷史決策訊號表格渲染
+    // 6. 歷史決策訊號表格渲染
     renderHistorySignals(historySignals, totalTScoresCount);
 }
 
+/**
+ * 渲染 6 個月歷史決策與關鍵轉折表格
+ */
 function renderHistorySignals(signals, totalCount) {
     const historyBody = document.getElementById("historyMatrixBody");
     const countTag = document.getElementById("historyCountTag");
     if (!historyBody) return;
 
     if (countTag) {
-        countTag.innerText = `已掃描 ${Math.min(totalCount, 120)} 個交易日，共補獲 ${signals.length} 筆關鍵訊號`;
+        countTag.innerText = `已掃描 ${Math.min(totalCount, 120)} 個交易日，共捕獲 ${signals.length} 筆關鍵訊號`;
     }
 
     if (!signals || signals.length === 0) {
@@ -115,6 +140,7 @@ function renderHistorySignals(signals, totalCount) {
     }
 
     let html = "";
+    // 採雙欄 (Two Columns) 展示歷史紀錄，提升版面閱讀效率
     for (let i = 0; i < signals.length; i += 2) {
         const item1 = signals[i];
         const item2 = signals[i + 1];
@@ -130,7 +156,7 @@ function renderHistorySignals(signals, totalCount) {
         };
 
         html += `
-            <tr class="hover:bg-slate-700/30 transition">
+            <tr class="hover:bg-slate-700/30 transition border-b border-slate-800/40">
                 ${renderCell(item1)}
                 ${item2 ? renderCell(item2) : '<td class="p-3 border-l border-slate-700/60">--</td><td class="p-3">--</td><td class="p-3">--</td>'}
             </tr>
@@ -139,11 +165,19 @@ function renderHistorySignals(signals, totalCount) {
     historyBody.innerHTML = html;
 }
 
+/**
+ * 更新四大 T-Score 單一指標卡片
+ */
 function updateCard(type, val, desc) {
-    document.getElementById(`${type}Value`).innerText = val.toFixed(1);
-    document.getElementById(`${type}Status`).innerText = desc;
+    const valElem = document.getElementById(`${type}Value`);
+    const statusElem = document.getElementById(`${type}Status`);
+    if (valElem) valElem.innerText = val.toFixed(1);
+    if (statusElem) statusElem.innerText = desc;
 }
 
+/**
+ * 產生動能矩陣資料列 HTML
+ */
 function renderRow(label, curr, d1, d5, d10) {
     const formatD = (val) => {
         const color = val > 0 ? "text-rose-400" : val < 0 ? "text-emerald-400" : "text-slate-400";
@@ -161,6 +195,9 @@ function renderRow(label, curr, d1, d5, d10) {
     `;
 }
 
+/**
+ * 取得 T-Score 數值對應位階區間描述
+ */
 function getLevelDesc(type, val) {
     if (val >= 70) return "≥70 極致超買/暴甩頂點";
     if (val >= 60) return "60~69 強勢延伸/放量擴張";
@@ -170,4 +207,5 @@ function getLevelDesc(type, val) {
     return "<30 極致超賣/Squeeze臨界";
 }
 
+// 頁面載入後自動執行預設股票 (2330) 分析
 window.onload = () => analyzeStock();
