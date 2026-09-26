@@ -1,4 +1,4 @@
-// 已更新為最新 Google Apps Script 部署 URL
+// 已更新最新部署之 GAS API 網址
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx69HynfFUSdL5PpmUN6dxrU7K66Ms__wsQpwfLrrF6aCWS6jHuanv62O0LL6jCapfm/exec";
 
 async function analyzeStock() {
@@ -6,45 +6,43 @@ async function analyzeStock() {
     const code = codeInput ? codeInput.value.trim() : "2330";
     if (!code) return;
 
-    document.getElementById("decisionDesc").innerText = "正在連線抓取 Google Finance 數據與計算決策矩陣...";
+    document.getElementById("decisionDesc").innerText = `發起 ${code} 實時 Fetch 請求中...`;
 
     try {
         const res = await fetch(`${GAS_API_URL}?code=${encodeURIComponent(code)}`);
         const rawData = await res.json();
 
         if (!rawData || rawData.status === "error" || !rawData.data || rawData.data.length === 0) {
-            document.getElementById("decisionDesc").innerText = rawData.message || "無法取得行情資料。";
+            document.getElementById("decisionDesc").innerText = rawData.message || `無法取得 ${code} 行情數據。`;
             return;
         }
 
         const engine = new QuantDecisionEngine(rawData.data);
         const result = engine.getLatestAnalysis();
-        const history = engine.getHistoricalDecisionSignals(120); // 抓取 6 個月 (120 交易日) 紀錄
+        const history = engine.getHistoricalDecisionSignals(120);
 
         if (!result) {
-            document.getElementById("decisionDesc").innerText = "數據筆數不足，無法完成矩陣計算。";
+            document.getElementById("decisionDesc").innerText = "歷史數據長度不足，無法計算對數 T-Score。";
             return;
         }
 
         updateUI(result, history, rawData.isBefore9AM, rawData.name, code);
 
     } catch (err) {
-        console.error("Fetch Error:", err);
-        document.getElementById("decisionDesc").innerText = "資料連線失敗，請檢查 GAS API 部署狀態與 CORS 權限。";
+        console.error("API 連線失敗:", err);
+        document.getElementById("decisionDesc").innerText = "無法取得數據。請確認網路連線或 GAS 存取權限。";
     }
 }
 
 function updateUI(res, history, isBefore9AM, stockName, code) {
     const { current, delta, decision, advRiskControl } = res;
 
-    // 1. 更新股票資訊
-    document.getElementById("stockTitle").innerHTML = `<span class="text-2xl font-extrabold text-white">${code}</span> <span class="text-base text-slate-300 font-normal mt-1">${stockName || ''}</span>`;
+    document.getElementById("stockTitle").innerHTML = `<span class="text-2xl font-extrabold text-white">${code}</span> <span class="text-sm text-slate-300 font-normal mt-1">${stockName || ''}</span>`;
     document.getElementById("priceLabel").innerText = isBefore9AM ? "昨日 (T-1) 收盤價" : "當日 (T) 即時股價";
     document.getElementById("volumeLabel").innerText = isBefore9AM ? "昨日 (T-1) 成交量" : "當日 (T) 即時成交量";
     document.getElementById("stockPrice").innerText = `NT$ ${current.close.toFixed(2)}`;
     document.getElementById("stockVolume").innerText = `${Number(current.volume).toLocaleString()} 張`;
 
-    // 2. 決策訊號徽章
     document.getElementById("decisionDesc").innerText = `${decision.name}：${decision.desc}`;
     const badge = document.getElementById("signalBadge");
     const cardSignal = document.getElementById("cardSignal");
@@ -52,34 +50,29 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
 
     if (decision.color === "green") {
         cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-emerald-500/80 flex flex-col justify-between shadow-lg shadow-emerald-500/10";
-        badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm md:text-base bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-center";
+        badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-center";
     } else if (decision.color === "red") {
         cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-rose-500/80 flex flex-col justify-between shadow-lg shadow-rose-500/10";
-        badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm md:text-base bg-rose-500/20 text-rose-400 border border-rose-500/30 text-center";
+        badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-rose-500/20 text-rose-400 border border-rose-500/30 text-center";
     } else {
         cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-sky-500/80 flex flex-col justify-between shadow-lg shadow-sky-500/10";
-        badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm md:text-base bg-sky-500/20 text-sky-400 border border-sky-500/30 text-center";
+        badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-sky-500/20 text-sky-400 border border-sky-500/30 text-center";
     }
 
-    // 3. 更新四指標卡片
-    updateCard("sdv", current.SDV, getLevelDesc("SDV", current.SDV));
-    updateCard("vdv", current.VDV, getLevelDesc("VDV", current.VDV));
-    updateCard("adv", current.ADV, getLevelDesc("ADV", current.ADV));
-    updateCard("bdv", current.BDV, getLevelDesc("BDV", current.BDV));
+    updateCard("sdv", current.SDV, getLevelDesc(current.SDV));
+    updateCard("vdv", current.VDV, getLevelDesc(current.VDV));
+    updateCard("adv", current.ADV, getLevelDesc(current.ADV));
+    updateCard("bdv", current.BDV, getLevelDesc(current.BDV));
 
-    // 4. 更新 ADV 動態風控樞紐
     document.getElementById("advStopLossMode").innerText = advRiskControl.stopLossMode;
     document.getElementById("advStopLossRule").innerText = advRiskControl.stopLossRule;
     
     const tpAlertElem = document.getElementById("advTakeProfitAlert");
     tpAlertElem.innerText = advRiskControl.takeProfitAlert;
-    if (advRiskControl.action === "EXIT_FULL") {
-        tpAlertElem.className = "text-base font-bold text-rose-400 bg-rose-950/50 p-2 rounded border border-rose-500/50 animate-pulse";
-    } else {
-        tpAlertElem.className = "text-sm font-semibold text-emerald-400";
-    }
+    tpAlertElem.className = advRiskControl.action === "EXIT_FULL" 
+        ? "text-sm font-bold text-rose-400 bg-rose-950/50 p-2 rounded border border-rose-500/50 animate-pulse"
+        : "text-sm font-semibold text-emerald-400";
 
-    // 5. 更新 Δ 動能矩陣表格
     document.getElementById("deltaMatrixBody").innerHTML = `
         ${renderRow("SDV (股價離差)", current.SDV, delta.SDV_1, delta.SDV_5, delta.SDV_10)}
         ${renderRow("VDV (量能離差)", current.VDV, delta.VDV_1, delta.VDV_5, delta.VDV_10)}
@@ -87,7 +80,6 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
         ${renderRow("BDV (帶寬離差)", current.BDV, delta.BDV_1, delta.BDV_5, delta.BDV_10)}
     `;
 
-    // 6. 渲染近 6 個月歷史決策訊號紀錄表
     renderHistoryTable(history);
 }
 
@@ -122,13 +114,11 @@ function renderHistoryTable(history) {
         return;
     }
 
-    let buyCount = 0;
-    let exitCount = 0;
+    let buyCount = 0, exitCount = 0;
 
-    const rows = history.map(item => {
+    tbody.innerHTML = history.map(item => {
         const dec = item.decision;
         let badgeClass = "bg-slate-700 text-slate-300";
-        
         if (dec.color === "green") {
             badgeClass = "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
             buyCount++;
@@ -144,25 +134,16 @@ function renderHistoryTable(history) {
                 <td class="p-3 font-mono text-slate-400">${item.SDV.toFixed(1)}</td>
                 <td class="p-3 font-mono text-slate-400">${item.VDV.toFixed(1)}</td>
                 <td class="p-3 font-mono text-slate-400">${item.ADV.toFixed(1)} / ${item.BDV.toFixed(1)}</td>
-                <td class="p-3">
-                    <span class="px-2.5 py-1 rounded text-xs font-bold ${badgeClass}">
-                        ${dec.name}
-                    </span>
-                </td>
+                <td class="p-3"><span class="px-2 py-1 rounded text-xs font-bold ${badgeClass}">${dec.name}</span></td>
                 <td class="p-3 text-xs text-slate-400">${item.riskAlert !== "常態監控中" ? `<span class="text-rose-400 font-bold">${item.riskAlert}</span>` : dec.desc}</td>
             </tr>
         `;
     }).join("");
 
-    tbody.innerHTML = rows;
-
-    const summaryElem = document.getElementById("historySummary");
-    if (summaryElem) {
-        summaryElem.innerText = `近 6 個月 (120 交易日) 共觸發 ${buyCount} 次買進/加碼訊號，${exitCount} 次平倉/風險預警訊號。`;
-    }
+    document.getElementById("historySummary").innerText = `近 6 個月 (120 交易日) 實時回測：觸發 ${buyCount} 次買進/加碼，${exitCount} 次平倉/風控。`;
 }
 
-function getLevelDesc(type, val) {
+function getLevelDesc(val) {
     if (val >= 70) return "≥70 極致超買/暴甩頂點";
     if (val >= 60) return "60~69 強勢延伸/放量擴張";
     if (val >= 50) return "50~59 中性偏多/溫和控盤";
@@ -171,5 +152,5 @@ function getLevelDesc(type, val) {
     return "<30 極致超賣/Squeeze臨界";
 }
 
-// 初次載入時自動執行一次分析
+// 頁面載入完成後自動分析預設股票 (2330)
 window.onload = () => analyzeStock();

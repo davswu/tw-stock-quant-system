@@ -1,5 +1,5 @@
 /**
- * 台股四指標對數標準化 (T-Score) 與雙層決策矩陣引擎
+ * QuantDecisionEngine - 對數標準化 (T-Score) 與共振決策矩陣運算引擎
  */
 class QuantDecisionEngine {
     constructor(rawData) {
@@ -7,6 +7,9 @@ class QuantDecisionEngine {
         this.tScores = [];
     }
 
+    /**
+     * 計算 TR、ATR(14) 與 Bollinger Bandwidth(20)
+     */
     calculateDerivedMetrics() {
         const len = this.rawData.length;
         let trs = [];
@@ -18,8 +21,7 @@ class QuantDecisionEngine {
                 const h = this.rawData[i].high;
                 const l = this.rawData[i].low;
                 const prevC = this.rawData[i - 1].close;
-                const tr = Math.max(h - l, Math.abs(h - prevC), Math.abs(l - prevC));
-                trs.push(tr);
+                trs.push(Math.max(h - l, Math.abs(h - prevC), Math.abs(l - prevC)));
             }
         }
 
@@ -28,8 +30,7 @@ class QuantDecisionEngine {
             if (i < 13) {
                 atrs.push(null);
             } else {
-                const slice = trs.slice(i - 13, i + 1);
-                const sum = slice.reduce((a, b) => a + b, 0);
+                const sum = trs.slice(i - 13, i + 1).reduce((a, b) => a + b, 0);
                 atrs.push(sum / 14);
             }
         }
@@ -43,10 +44,7 @@ class QuantDecisionEngine {
                 const mean = sliceC.reduce((a, b) => a + b, 0) / 20;
                 const variance = sliceC.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / 20;
                 const std = Math.sqrt(variance);
-                const upper = mean + 2 * std;
-                const lower = mean - 2 * std;
-                const bw = mean === 0 ? 0 : (upper - lower) / mean;
-                bws.push(bw);
+                bws.push(mean === 0 ? 0 : (4 * std) / mean);
             }
         }
 
@@ -56,6 +54,9 @@ class QuantDecisionEngine {
         }
     }
 
+    /**
+     * 計算 30 日滾動對數標準化 T-Score (SDV, VDV, ADV, BDV)
+     */
     calculateTScores(windowSize = 30) {
         this.calculateDerivedMetrics();
         const len = this.rawData.length;
@@ -68,7 +69,6 @@ class QuantDecisionEngine {
             }
 
             const window = this.rawData.slice(i - windowSize + 1, i + 1);
-
             const lnP = window.map(d => Math.log(Math.max(d.close, 0.0001)));
             const lnV = window.map(d => Math.log(Math.max(d.volume, 1)));
             const lnA = window.map(d => Math.log(Math.max(d.atr, 0.0001)));
@@ -80,8 +80,7 @@ class QuantDecisionEngine {
                 const variance = lnArray.reduce((a, b) => a + Math.pow(b - mu, 2), 0) / lnArray.length;
                 const sigma = Math.sqrt(variance);
                 if (sigma === 0) return 50;
-                const z = (lnVal - mu) / sigma;
-                return Math.min(100, Math.max(0, 10 * z + 50));
+                return Math.min(100, Math.max(0, 10 * ((lnVal - mu) / sigma) + 50));
             };
 
             const curr = this.rawData[i];
@@ -100,35 +99,32 @@ class QuantDecisionEngine {
         return this.tScores;
     }
 
+    /**
+     * 取得最新交易日分析數據
+     */
     getLatestAnalysis() {
         if (this.tScores.length === 0) this.calculateTScores();
         const ts = this.tScores;
         const len = ts.length;
-
         if (len < 11) return null;
 
         const t = ts[len - 1];
-        const t_1 = ts[len - 2];
-        const t_5 = ts[len - 6];
-        const t_10 = ts[len - 11];
-
-        const delta = this.computeDelta(t, t_1, t_5, t_10);
-        const decision = this.matchDecisionMatrix(t, delta);
-        const advRiskControl = this.evaluateADVRiskControl(t, delta);
-
+        const delta = this.computeDelta(t, ts[len - 2], ts[len - 6], ts[len - 11]);
         return {
             current: t,
             delta: delta,
-            decision: decision,
-            advRiskControl: advRiskControl
+            decision: this.matchDecisionMatrix(t, delta),
+            advRiskControl: this.evaluateADVRiskControl(t, delta)
         };
     }
 
+    /**
+     * 取得近 120 交易日歷史系統決策紀錄
+     */
     getHistoricalDecisionSignals(tradingDays = 120) {
         if (this.tScores.length === 0) this.calculateTScores();
         const ts = this.tScores;
         const len = ts.length;
-
         if (len < 11) return [];
 
         let historySignals = [];
@@ -136,11 +132,7 @@ class QuantDecisionEngine {
 
         for (let i = startIndex; i < len; i++) {
             const t = ts[i];
-            const t_1 = ts[i - 1];
-            const t_5 = ts[i - 5];
-            const t_10 = ts[i - 10];
-
-            const delta = this.computeDelta(t, t_1, t_5, t_10);
+            const delta = this.computeDelta(t, ts[i - 1], ts[i - 5], ts[i - 10]);
             const decision = this.matchDecisionMatrix(t, delta);
             const advRisk = this.evaluateADVRiskControl(t, delta);
 
@@ -153,11 +145,9 @@ class QuantDecisionEngine {
                 ADV: t.ADV,
                 BDV: t.BDV,
                 decision: decision,
-                action: advRisk.action !== "HOLD" ? advRisk.action : decision.action,
                 riskAlert: advRisk.takeProfitAlert
             });
         }
-
         return historySignals.reverse();
     }
 
@@ -171,10 +161,7 @@ class QuantDecisionEngine {
     }
 
     evaluateADVRiskControl(t, delta) {
-        let stopLossMode = "";
-        let stopLossRule = "";
-        let takeProfitAlert = "常態監控中";
-        let action = "HOLD";
+        let stopLossMode = "", stopLossRule = "", takeProfitAlert = "常態監控中", action = "HOLD";
 
         if (t.ADV < 40) {
             stopLossMode = "低波動蓄勢期（窄停損）";
@@ -201,39 +188,31 @@ class QuantDecisionEngine {
     matchDecisionMatrix(t, d) {
         const { SDV, VDV, ADV, BDV } = t;
 
-        // 1. 蓄勢突破
-        if (ADV >= 40 && ADV <= 50 && BDV < 40 &&
-            SDV >= 50 && SDV <= 60 && VDV >= 60 &&
+        if (ADV >= 40 && ADV <= 50 && BDV < 40 && SDV >= 50 && SDV <= 60 && VDV >= 60 &&
             d.SDV_10 >= 3 && d.VDV_10 > 0 && d.ADV_10 <= 0 && d.BDV_10 <= -3 &&
             d.SDV_5 >= 3 && d.VDV_5 >= 3 && d.BDV_5 <= -3 &&
             d.SDV_1 >= 3 && d.VDV_1 >= 3 && d.ADV_1 > 0 && d.BDV_1 >= 3) {
             return { action: "BUY_FIRST", name: "蓄勢突破", signal: "買進 (首筆)", color: "green", desc: "變盤蓄勢完成，主力放量衝過中軸，啟動強烈突破。" };
         }
 
-        // 2. 順勢拉回
-        if (ADV >= 40 && ADV <= 50 && BDV >= 50 && BDV <= 60 &&
-            SDV >= 50 && SDV <= 59 && VDV < 40 &&
+        if (ADV >= 40 && ADV <= 50 && BDV >= 50 && BDV <= 60 && SDV >= 50 && SDV <= 59 && VDV < 40 &&
             d.SDV_10 >= 3 && d.VDV_10 >= 3 && d.BDV_10 >= 3 &&
             d.SDV_5 >= -3 && d.SDV_5 <= 0 && d.VDV_5 <= -3 && d.ADV_5 <= 0 &&
             d.SDV_1 >= 3 && d.VDV_1 > 0 && d.BDV_1 >= 0) {
             return { action: "BUY_ADD", name: "順勢拉回", signal: "加碼 (二次)", color: "green", desc: "主升段拉回無量洗盤結束，出現止跌陽線重啟攻勢。" };
         }
 
-        // 3. 極致超跌
         if (ADV >= 70 && BDV >= 70 && SDV < 30 && VDV >= 70 &&
             d.SDV_10 <= -10 && d.VDV_10 >= 10 && d.ADV_10 >= 10 && d.BDV_10 >= 10 &&
             d.SDV_1 >= 3 && d.ADV_1 <= -3 && d.BDV_1 <= -3) {
             return { action: "BUY_BOTTOM", name: "極致超跌", signal: "抄底買進", color: "green", desc: "恐慌盤極致釋放與天量換手，出現長下影止跌訊號。" };
         }
 
-        // 4. 過熱高潮
         if (ADV >= 70 && BDV >= 70 && SDV >= 70 && (VDV >= 70 || VDV < 40) &&
-            d.SDV_10 >= 10 && d.SDV_5 < 3 && d.VDV_5 <= -3 &&
-            d.SDV_1 <= -3 && d.BDV_1 <= -3) {
+            d.SDV_10 >= 10 && d.SDV_5 < 3 && d.VDV_5 <= -3 && d.SDV_1 <= -3 && d.BDV_1 <= -3) {
             return { action: "EXIT_FULL_PROFIT", name: "過熱高潮", signal: "大獲利平倉", color: "red", desc: "情緒高潮與帶寬頂點，動能急遽放緩，拐點反轉離場。" };
         }
 
-        // 5. 破位停損
         if (ADV >= 60 && BDV >= 50 && SDV < 50 && VDV >= 60 &&
             d.SDV_10 <= -10 && d.VDV_10 >= 3 && d.ADV_10 >= 3 && d.BDV_10 >= 3 &&
             d.SDV_5 <= -3 && d.VDV_5 >= 3 && d.ADV_5 >= 3 && d.BDV_5 >= 3 &&
