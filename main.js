@@ -1,4 +1,4 @@
-// 已更新最新部署之 GAS API 網址
+// 已更新最新部署之 GAS API 端點網址
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx69HynfFUSdL5PpmUN6dxrU7K66Ms__wsQpwfLrrF6aCWS6jHuanv62O0LL6jCapfm/exec";
 
 async function analyzeStock() {
@@ -6,14 +6,14 @@ async function analyzeStock() {
     const code = codeInput ? codeInput.value.trim() : "2330";
     if (!code) return;
 
-    document.getElementById("decisionDesc").innerText = `發起 ${code} 實時 Fetch 請求中...`;
+    document.getElementById("decisionDesc").innerText = `正在抓取 ${code} 即時行情資料...`;
 
     try {
         const res = await fetch(`${GAS_API_URL}?code=${encodeURIComponent(code)}`);
         const rawData = await res.json();
 
         if (!rawData || rawData.status === "error" || !rawData.data || rawData.data.length === 0) {
-            document.getElementById("decisionDesc").innerText = rawData.message || `無法取得 ${code} 行情數據。`;
+            document.getElementById("decisionDesc").innerText = rawData.message || `無法取得 ${code} 行情，請確認股票代碼。`;
             return;
         }
 
@@ -22,7 +22,7 @@ async function analyzeStock() {
         const history = engine.getHistoricalDecisionSignals(120);
 
         if (!result) {
-            document.getElementById("decisionDesc").innerText = "歷史數據長度不足，無法計算對數 T-Score。";
+            document.getElementById("decisionDesc").innerText = "歷史資料筆數不足，無法計算對數 T-Score。";
             return;
         }
 
@@ -30,7 +30,7 @@ async function analyzeStock() {
 
     } catch (err) {
         console.error("API 連線失敗:", err);
-        document.getElementById("decisionDesc").innerText = "無法取得數據。請確認網路連線或 GAS 存取權限。";
+        document.getElementById("decisionDesc").innerText = "無法取得數據，請檢查網路連線或 CORS 設定。";
     }
 }
 
@@ -152,5 +152,5 @@ function getLevelDesc(val) {
     return "<30 極致超賣/Squeeze臨界";
 }
 
-// 頁面載入完成後自動分析預設股票 (2330)
+// 頁面載入完成後自動分析 2330
 window.onload = () => analyzeStock();

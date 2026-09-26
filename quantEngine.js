@@ -8,7 +8,7 @@ class QuantDecisionEngine {
     }
 
     /**
-     * 計算 TR、ATR(14) 與 Bollinger Bandwidth(20)
+     * 計算真實波動區間 (TR)、ATR(14) 與布林帶寬 (Bandwidth 20)
      */
     calculateDerivedMetrics() {
         const len = this.rawData.length;
@@ -100,7 +100,7 @@ class QuantDecisionEngine {
     }
 
     /**
-     * 取得最新交易日分析數據
+     * 取得最新交易日分析結果
      */
     getLatestAnalysis() {
         if (this.tScores.length === 0) this.calculateTScores();
@@ -119,7 +119,7 @@ class QuantDecisionEngine {
     }
 
     /**
-     * 取得近 120 交易日歷史系統決策紀錄
+     * 取得近 N 交易日歷史決策訊號
      */
     getHistoricalDecisionSignals(tradingDays = 120) {
         if (this.tScores.length === 0) this.calculateTScores();
