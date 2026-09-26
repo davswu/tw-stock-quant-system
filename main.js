@@ -114,7 +114,7 @@ function updateUI(analysisResult, isBefore9AM = false) {
     // 5. Δ 動能矩陣表格
     renderDeltaMatrix(latest);
 
-    // 6. 歷史 6 個月決策紀錄表格 (雙欄)
+    // 6. 歷史 6 個月買入/賣出決策紀錄表格
     renderHistorySignals(history6M);
 }
 
@@ -169,7 +169,7 @@ function renderDeltaMatrix(latest) {
 }
 
 /**
- * 繪製歷史 6 個月決策紀錄表格 (左右雙欄拆分渲染)
+ * 繪製歷史 6 個月決策紀錄表格 (依據買入與賣出/警戒訊號自動分欄對齊)
  */
 function renderHistorySignals(historyList) {
     const tbody = document.getElementById("historyMatrixBody");
@@ -181,37 +181,61 @@ function renderHistorySignals(historyList) {
         return;
     }
 
-    if (countTag) countTag.innerText = `共存儲 ${historyList.length} 個交易日紀錄`;
+    // 分離買入訊號與賣出/警戒訊號，由新到舊排序
+    const buySignals = historyList
+        .filter(item => item.decision.signalType === "BUY")
+        .reverse();
+        
+    const sellSignals = historyList
+        .filter(item => item.decision.signalType === "SELL" || item.decision.signalType === "WARN")
+        .reverse();
 
-    // 由新到舊排序
-    const reversed = [...historyList].reverse();
-    const half = Math.ceil(reversed.length / 2);
-    const leftCol = reversed.slice(0, half);
-    const rightCol = reversed.slice(half);
+    if (countTag) {
+        countTag.innerText = `近 6 個月共監測到 ${buySignals.length} 筆買入訊號 / ${sellSignals.length} 筆賣出(警戒)訊號`;
+    }
+
+    const maxRows = Math.max(buySignals.length, sellSignals.length);
+
+    if (maxRows === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="p-4 text-slate-500">近 6 個月內無明確買入或賣出共振訊號 (均處於常態整理)</td></tr>`;
+        return;
+    }
 
     let html = "";
-    for (let i = 0; i < leftCol.length; i++) {
-        const left = leftCol[i];
-        const right = rightCol[i];
+    for (let i = 0; i < maxRows; i++) {
+        const buy = buySignals[i];
+        const sell = sellSignals[i];
 
         html += `<tr class="hover:bg-slate-800/40 transition">`;
 
-        // 左欄
-        html += `
-            <td class="p-2.5 text-slate-400 text-xs text-left">${left.date}</td>
-            <td class="p-2.5 text-slate-200 font-bold">${left.close}</td>
-            <td class="p-2.5">${getBadgeTagHtml(left.decision.signalType, left.decision.badgeText)}</td>
-        `;
-
-        // 右欄
-        if (right) {
+        // 左欄：買入決策訊號
+        if (buy) {
             html += `
-                <td class="p-2.5 text-slate-400 text-xs text-left border-l border-slate-700/60">${right.date}</td>
-                <td class="p-2.5 text-slate-200 font-bold">${right.close}</td>
-                <td class="p-2.5">${getBadgeTagHtml(right.decision.signalType, right.decision.badgeText)}</td>
+                <td class="p-2.5 text-slate-400 text-xs text-left">${buy.date}</td>
+                <td class="p-2.5 text-slate-200 font-bold">${buy.close}</td>
+                <td class="p-2.5">${getBadgeTagHtml(buy.decision.signalType, buy.decision.badgeText)}</td>
             `;
         } else {
-            html += `<td colspan="3" class="border-l border-slate-700/60"></td>`;
+            html += `
+                <td class="p-2.5 text-slate-600 text-xs text-left">--</td>
+                <td class="p-2.5 text-slate-600">--</td>
+                <td class="p-2.5 text-slate-600">--</td>
+            `;
+        }
+
+        // 右欄：賣出決策訊號
+        if (sell) {
+            html += `
+                <td class="p-2.5 text-slate-400 text-xs text-left border-l border-slate-700/60">${sell.date}</td>
+                <td class="p-2.5 text-slate-200 font-bold">${sell.close}</td>
+                <td class="p-2.5">${getBadgeTagHtml(sell.decision.signalType, sell.decision.badgeText)}</td>
+            `;
+        } else {
+            html += `
+                <td class="p-2.5 text-slate-600 text-xs text-left border-l border-slate-700/60">--</td>
+                <td class="p-2.5 text-slate-600">--</td>
+                <td class="p-2.5 text-slate-600">--</td>
+            `;
         }
 
         html += `</tr>`;
