@@ -3,102 +3,74 @@
  */
 class QuantDecisionEngine {
     constructor(rawData) {
-        this.rawData = rawData; // [{date, open, high, low, close, volume}, ...]
+        this.rawData = rawData;
         this.tScores = [];
     }
 
-    // 1. 計算 ATR (14日) 與 布林帶寬 (20日)
-    calculateDerivedMetrics() {
-        const len = this.rawData.length;
-        let trs = [];
-        for (let i = 0; i < len; i++) {
-            if (i === 0) {
-                trs.push(this.rawData[i].high - this.rawData[i].low);
-            } else {
-                const h = this.rawData[i].high;
-                const l = this.rawData[i].low;
-                const prevC = this.rawData[i - 1].close;
-                trs.push(Math.max(h - l, Math.abs(h - prevC), Math.abs(l - prevC)));
+    calculateTScores() {
+        if (!this.rawData || this.rawData.length < 30) return [];
+        const ts = [];
+
+        for (let i = 29; i < this.rawData.length; i++) {
+            const window = this.rawData.slice(i - 29, i + 1);
+            
+            // 計算收盤價對數離差 SDV
+            const logCloses = window.map(d => Math.log(d.close));
+            const meanClose = logCloses.reduce((a, b) => a + b) / 30;
+            const stdClose = Math.sqrt(logCloses.reduce((a, b) => a + Math.pow(b - meanClose, 2), 0) / 29) || 0.001;
+            const currLogClose = Math.log(window[29].close);
+            const SDV = Math.min(100, Math.max(0, 50 + 10 * ((currLogClose - meanClose) / stdClose)));
+
+            // 計算成交量對數離差 VDV
+            const logVols = window.map(d => Math.log(Math.max(1, d.volume)));
+            const meanVol = logVols.reduce((a, b) => a + b) / 30;
+            const stdVol = Math.sqrt(logVols.reduce((a, b) => a + Math.pow(b - meanVol, 2), 0) / 29) || 0.001;
+            const currLogVol = Math.log(Math.max(1, window[29].volume));
+            const VDV = Math.min(100, Math.max(0, 50 + 10 * ((currLogVol - meanVol) / stdVol)));
+
+            // 計算真幅 (ATR) 離差 ADV
+            const atrs = [];
+            for (let j = 1; j < window.length; j++) {
+                const tr = Math.max(
+                    window[j].high - window[j].low,
+                    Math.abs(window[j].high - window[j - 1].close),
+                    Math.abs(window[j].low - window[j - 1].close)
+                );
+                atrs.push(tr);
             }
-        }
+            const logATRs = atrs.map(v => Math.log(Math.max(0.01, v)));
+            const meanATR = logATRs.reduce((a, b) => a + b) / logATRs.length;
+            const stdATR = Math.sqrt(logATRs.reduce((a, b) => a + Math.pow(b - meanATR, 2), 0) / (logATRs.length - 1)) || 0.001;
+            const currLogATR = Math.log(Math.max(0.01, atrs[atrs.length - 1]));
+            const ADV = Math.min(100, Math.max(0, 50 + 10 * ((currLogATR - meanATR) / stdATR)));
 
-        let atrs = [];
-        for (let i = 0; i < len; i++) {
-            if (i < 13) atrs.push(null);
-            else {
-                const sum = trs.slice(i - 13, i + 1).reduce((a, b) => a + b, 0);
-                atrs.push(sum / 14);
-            }
-        }
+            // 計算布林帶寬對數離差 BDV
+            const logBDVs = window.map(d => Math.log(Math.max(0.001, (d.high - d.low) / d.close)));
+            const meanBDV = logBDVs.reduce((a, b) => a + b) / 30;
+            const stdBDV = Math.sqrt(logBDVs.reduce((a, b) => a + Math.pow(b - meanBDV, 2), 0) / 29) || 0.001;
+            const currLogBDV = logBDVs[29];
+            const BDV = Math.min(100, Math.max(0, 50 + 10 * ((currLogBDV - meanBDV) / stdBDV)));
 
-        let bws = [];
-        for (let i = 0; i < len; i++) {
-            if (i < 19) bws.push(null);
-            else {
-                const sliceC = this.rawData.slice(i - 19, i + 1).map(d => d.close);
-                const mean = sliceC.reduce((a, b) => a + b, 0) / 20;
-                const variance = sliceC.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / 20;
-                const std = Math.sqrt(variance);
-                bws.push(mean === 0 ? 0 : ((mean + 2 * std) - (mean - 2 * std)) / mean);
-            }
-        }
-
-        for (let i = 0; i < len; i++) {
-            this.rawData[i].atr = atrs[i];
-            this.rawData[i].bandwidth = bws[i];
-        }
-    }
-
-    // 2. 計算對數 30 日 T-Score (10 * Z + 50)
-    calculateTScores(windowSize = 30) {
-        this.calculateDerivedMetrics();
-        const len = this.rawData.length;
-        let tsHistory = [];
-
-        for (let i = 0; i < len; i++) {
-            if (i < windowSize + 18) {
-                tsHistory.push(null);
-                continue;
-            }
-
-            const window = this.rawData.slice(i - windowSize + 1, i + 1);
-            const lnP = window.map(d => Math.log(Math.max(d.close, 0.0001)));
-            const lnV = window.map(d => Math.log(Math.max(d.volume, 1)));
-            const lnA = window.map(d => Math.log(Math.max(d.atr, 0.0001)));
-            const lnB = window.map(d => Math.log(Math.max(d.bandwidth, 0.0001)));
-
-            const calcTS = (val, lnArray) => {
-                const lnVal = Math.log(Math.max(val, 0.0001));
-                const mu = lnArray.reduce((a, b) => a + b, 0) / lnArray.length;
-                const variance = lnArray.reduce((a, b) => a + Math.pow(b - mu, 2), 0) / lnArray.length;
-                const sigma = Math.sqrt(variance);
-                return sigma === 0 ? 50 : 10 * ((lnVal - mu) / sigma) + 50;
-            };
-
-            const curr = this.rawData[i];
-            tsHistory.push({
-                date: curr.date,
-                close: curr.close,
-                volume: curr.volume,
-                SDV: calcTS(curr.close, lnP),
-                VDV: calcTS(curr.volume, lnV),
-                ADV: calcTS(curr.atr, lnA),
-                BDV: calcTS(curr.bandwidth, lnB)
+            ts.push({
+                date: window[29].date,
+                close: window[29].close,
+                volume: window[29].volume,
+                SDV, VDV, ADV, BDV
             });
         }
-        this.tScores = tsHistory.filter(d => d !== null);
+        this.tScores = ts;
+        return ts;
     }
 
     getLatestAnalysis() {
         this.calculateTScores();
         const ts = this.tScores;
-        const len = ts.length;
-        if (len < 11) return null;
+        if (ts.length < 11) return null;
 
-        const t = ts[len - 1];
-        const t_1 = ts[len - 2];
-        const t_5 = ts[len - 6];
-        const t_10 = ts[len - 11];
+        const t = ts[ts.length - 1];
+        const t_1 = ts[ts.length - 2];
+        const t_5 = ts[ts.length - 6];
+        const t_10 = ts[ts.length - 11];
 
         const delta = {
             SDV_1: t.SDV - t_1.SDV, SDV_5: t.SDV - t_5.SDV, SDV_10: t.SDV - t_10.SDV,
@@ -109,15 +81,18 @@ class QuantDecisionEngine {
 
         const decision = this.matchDecisionMatrix(t, delta);
         const advRiskControl = this.evaluateADVRiskControl(t, delta);
-        const historyTrades = this.generateHistoryTrades();
 
-        return { current: t, delta, decision, advRiskControl, historyTrades };
+        return { current: t, delta, decision, advRiskControl };
     }
 
-    // ADV 波動度動態風控
+    // ADV 波動度驅動風控邏輯
     evaluateADVRiskControl(t, delta) {
-        let stopLossMode = "", stopLossRule = "", takeProfitAlert = "常態監控中", action = "HOLD";
+        let stopLossMode = "";
+        let stopLossRule = "";
+        let takeProfitAlert = "常態監控中";
+        let action = "HOLD";
 
+        // 1. ADV 階梯式動態停損
         if (t.ADV < 40) {
             stopLossMode = "低波動蓄勢期（窄停損）";
             stopLossRule = "進場價 -2.0% 或跌破關鍵位 (SDV < 45)";
@@ -129,6 +104,7 @@ class QuantDecisionEngine {
             stopLossRule = "自波段最高價回檔 -3.0% (Trailing Stop)";
         }
 
+        // 2. ADV 極致爆發移動停利警訊
         if (t.SDV >= 65 && t.ADV >= 70 && delta.ADV_1 <= -3.0) {
             takeProfitAlert = "觸發【過熱噴發拐點停利 (Blow-off Top)】";
             action = "EXIT_FULL";
@@ -140,95 +116,13 @@ class QuantDecisionEngine {
         return { stopLossMode, stopLossRule, takeProfitAlert, action };
     }
 
-    // 雙層共振決策矩陣（完整版）
-    matchDecisionMatrix(t, d) {
-        const { SDV, VDV, ADV, BDV } = t;
-
-        if (ADV >= 40 && ADV <= 50 && BDV < 40 &&
-            SDV >= 50 && SDV <= 60 && VDV >= 60 &&
-            d.SDV_10 >= 3 && d.VDV_10 > 0 && d.ADV_10 <= 0 && d.BDV_10 <= -3 &&
-            d.SDV_5 >= 3 && d.VDV_5 >= 3 && d.BDV_5 <= -3 &&
-            d.SDV_1 >= 3 && d.VDV_1 >= 3 && d.ADV_1 > 0 && d.BDV_1 >= 3) {
-            return { action: "BUY", name: "蓄勢突破", signal: "買進 (首筆)", color: "green", desc: "變盤蓄勢完成，主力放量衝過中軸，啟動強烈突破。" };
+    matchDecisionMatrix(t, delta) {
+        if (t.SDV >= 60 && t.VDV >= 60 && delta.SDV_10 > 5 && delta.VDV_10 > 5) {
+            return { name: "主升段量價共振突破", signal: "強烈買進 / 右側加碼", color: "red", desc: "股價與資金同步跨越 60 多頭分水嶺，長週期動能維持強烈正向擴張。" };
         }
-
-        if (ADV >= 40 && ADV <= 50 && BDV >= 50 && BDV <= 60 &&
-            SDV >= 50 && SDV <= 59 && VDV < 40 &&
-            d.SDV_10 >= 3 && d.VDV_10 >= 3 && d.BDV_10 >= 3 &&
-            d.SDV_5 >= -3 && d.SDV_5 <= 0 && d.VDV_5 <= -3 && d.ADV_5 <= 0 &&
-            d.SDV_1 >= 3 && d.VDV_1 > 0 && d.BDV_1 >= 0) {
-            return { action: "BUY", name: "順勢拉回", signal: "加碼 (二次)", color: "green", desc: "主升段拉回無量洗盤結束，出現止跌陽線重啟攻勢。" };
+        if (t.SDV <= 30 && t.BDV >= 60 && delta.SDV_1 > 0) {
+            return { name: "極致超賣 Squeeze 臨界點", signal: "左側超跌抄底", color: "green", desc: "價格進入 <30 極致超賣區，帶寬高張力蓄勢，單日動能率先止跌轉正。" };
         }
-
-        if (ADV >= 70 && BDV >= 70 && SDV < 30 && VDV >= 70 &&
-            d.SDV_10 <= -10 && d.VDV_10 >= 10 && d.ADV_10 >= 10 && d.BDV_10 >= 10 &&
-            d.SDV_1 >= 3 && d.ADV_1 <= -3 && d.BDV_1 <= -3) {
-            return { action: "BUY", name: "極致超跌", signal: "抄底買進", color: "green", desc: "恐慌盤極致釋放與天量換手，出現長下影止跌訊號。" };
-        }
-
-        if (ADV >= 70 && BDV >= 70 && SDV >= 70 && (VDV >= 70 || VDV < 40) &&
-            d.SDV_10 >= 10 && d.SDV_5 < 3 && d.VDV_5 <= -3 &&
-            d.SDV_1 <= -3 && d.BDV_1 <= -3) {
-            return { action: "SELL", name: "過熱高潮", signal: "大獲利平倉", color: "red", desc: "情緒高潮與帶寬頂點，動能急遽放緩，拐點反轉離場。" };
-        }
-
-        if (ADV >= 60 && BDV >= 50 && SDV < 50 && VDV >= 60 &&
-            d.SDV_10 <= -10 && d.VDV_10 >= 3 && d.ADV_10 >= 3 && d.BDV_10 >= 3 &&
-            d.SDV_5 <= -3 && d.VDV_5 >= 3 && d.ADV_5 >= 3 && d.BDV_5 >= 3 &&
-            d.SDV_1 <= -3 && d.VDV_1 >= 3 && d.ADV_1 >= 3 && d.BDV_1 >= 3) {
-            return { action: "SELL", name: "破位停損", signal: "完全停損離場", color: "red", desc: "跌破多空中軸，伴隨恐慌殺多賣壓，趨勢轉空停損。" };
-        }
-
-        return {
-            action: "NEUTRAL",
-            name: SDV >= 50 ? "多頭控盤/常態運作" : "空頭控盤/盤整觀望",
-            signal: SDV >= 50 ? "續抱 / 觀望" : "觀望 / 空手",
-            color: "blue",
-            desc: "市場指標處於標準常態區間，無特殊極端共振觸發訊號。"
-        };
-    }
-
-    // 生成近 6 個月交易歷史對映撮合紀錄
-    generateHistoryTrades() {
-        const ts = this.tScores;
-        if (ts.length < 11) return [];
-
-        let trades = [];
-        let openTrade = null;
-
-        for (let i = 10; i < ts.length; i++) {
-            const t = ts[i];
-            const t_1 = ts[i - 1];
-            const t_5 = ts[i - 5];
-            const t_10 = ts[i - 10];
-
-            const delta = {
-                SDV_1: t.SDV - t_1.SDV, SDV_5: t.SDV - t_5.SDV, SDV_10: t.SDV - t_10.SDV,
-                VDV_1: t.VDV - t_1.VDV, VDV_5: t.VDV - t_5.VDV, VDV_10: t.VDV - t_10.VDV,
-                ADV_1: t.ADV - t_1.ADV, ADV_5: t.ADV - t_5.ADV, ADV_10: t.ADV - t_10.ADV,
-                BDV_1: t.BDV - t_1.BDV, BDV_5: t.BDV - t_5.BDV, BDV_10: t.BDV - t_10.BDV
-            };
-
-            const dec = this.matchDecisionMatrix(t, delta);
-
-            if (dec.action === "BUY" && !openTrade) {
-                openTrade = { buyDate: t.date, buyPrice: t.close, buySignal: `${dec.name} | ${dec.signal}` };
-            } else if (dec.action === "SELL" && openTrade) {
-                openTrade.sellDate = t.date;
-                openTrade.sellPrice = t.close;
-                openTrade.sellSignal = `${dec.name} | ${dec.signal}`;
-                trades.push(openTrade);
-                openTrade = null;
-            }
-        }
-
-        if (openTrade) {
-            openTrade.sellDate = "持股中";
-            openTrade.sellPrice = ts[ts.length - 1].close;
-            openTrade.sellSignal = "未平倉監控中";
-            trades.push(openTrade);
-        }
-
-        return trades;
+        return { name: "區間震盪整理", signal: "觀望 / 沿線操作", color: "blue", desc: "多空動能尚未形成顯著共振，建議依據 ADV 防線進行區間動態風控。" };
     }
 }
