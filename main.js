@@ -152,5 +152,5 @@ function getLevelDesc(val) {
     return "<30 極致超賣/Squeeze臨界";
 }
 
-// 頁面載入完成後自動分析 2330
+// 頁面載入完成後自動分析預設股票 (2330)
 window.onload = () => analyzeStock();
