@@ -1,5 +1,6 @@
 /**
  * 台股實時四指標與決策系統 - 主介面與 UI 渲染邏輯 (main.js)
+ * 升級版：包含歷史模擬交易一對一撮合與真實績效回測引擎
  */
 
 const GAS_API_URL = (typeof window !== 'undefined' && window.GAS_API_URL) 
@@ -114,8 +115,8 @@ function updateUI(analysisResult, isBefore9AM = false) {
     // 5. Δ 動能矩陣表格
     renderDeltaMatrix(latest);
 
-    // 6. 歷史 6 個月買入/賣出決策紀錄表格
-    renderHistorySignals(history6M);
+    // 6. 歷史 6 個月「模擬交易回測撮合」紀錄表格
+    renderTradeMatchingHistory(history6M);
 }
 
 /**
@@ -169,9 +170,10 @@ function renderDeltaMatrix(latest) {
 }
 
 /**
- * 繪製歷史 6 個月決策紀錄表格 (依據買入與賣出/警戒訊號自動分欄對齊)
+ * 核心升級：歷史 6 個月模擬交易回測撮合引擎
+ * 實現買入與賣出一對一撮合，並精確計算交易報酬率與勝率
  */
-function renderHistorySignals(historyList) {
+function renderTradeMatchingHistory(historyList) {
     const tbody = document.getElementById("historyMatrixBody");
     const countTag = document.getElementById("historyCountTag");
     if (!tbody) return;
@@ -181,67 +183,114 @@ function renderHistorySignals(historyList) {
         return;
     }
 
-    // 分離買入訊號與賣出/警戒訊號，由新到舊排序
-    const buySignals = historyList
-        .filter(item => item.decision.signalType === "BUY")
-        .reverse();
-        
-    const sellSignals = historyList
-        .filter(item => item.decision.signalType === "SELL" || item.decision.signalType === "WARN")
-        .reverse();
+    // 1. 順時序 (舊 -> 新) 進行回測撮合
+    const chronologicalList = [...historyList];
+    const trades = [];
+    let currentPosition = null;
 
-    if (countTag) {
-        countTag.innerText = `近 6 個月共監測到 ${buySignals.length} 筆買入訊號 / ${sellSignals.length} 筆賣出(警戒)訊號`;
+    for (let i = 0; i < chronologicalList.length; i++) {
+        const item = chronologicalList[i];
+        const sigType = item.decision.signalType;
+
+        if (!currentPosition) {
+            // 未持股狀態：尋找買入號誌
+            if (sigType === "BUY") {
+                currentPosition = {
+                    buyDate: item.date,
+                    buyPrice: item.close,
+                    buyBadge: item.decision.badgeText,
+                    buyIndex: i
+                };
+            }
+        } else {
+            // 持股狀態：尋找賣出或過熱警戒號誌
+            if (sigType === "SELL" || sigType === "WARN") {
+                const retPct = (((item.close - currentPosition.buyPrice) / currentPosition.buyPrice) * 100).toFixed(1);
+                trades.push({
+                    buyDate: currentPosition.buyDate,
+                    buyPrice: currentPosition.buyPrice,
+                    buyBadge: currentPosition.buyBadge,
+                    sellDate: item.date,
+                    sellPrice: item.close,
+                    sellBadge: item.decision.badgeText,
+                    retPct: parseFloat(retPct),
+                    isOpen: false
+                });
+                currentPosition = null; // 平倉完成，重置持股
+            }
+        }
     }
 
-    const maxRows = Math.max(buySignals.length, sellSignals.length);
+    // 處理尚未平倉的交易 (目前仍在持股中)
+    if (currentPosition) {
+        const latestItem = chronologicalList[chronologicalList.length - 1];
+        const retPct = (((latestItem.close - currentPosition.buyPrice) / currentPosition.buyPrice) * 100).toFixed(1);
+        trades.push({
+            buyDate: currentPosition.buyDate,
+            buyPrice: currentPosition.buyPrice,
+            buyBadge: currentPosition.buyBadge,
+            sellDate: "持股中",
+            sellPrice: latestItem.close,
+            sellBadge: "持股未平倉",
+            retPct: parseFloat(retPct),
+            isOpen: true
+        });
+    }
 
-    if (maxRows === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" class="p-4 text-slate-500">近 6 個月內無明確買入或賣出共振訊號 (均處於常態整理)</td></tr>`;
+    // 2. 計算勝率與統計指標
+    const closedTrades = trades.filter(t => !t.isOpen);
+    const winTrades = closedTrades.filter(t => t.retPct > 0);
+    const winRate = closedTrades.length > 0 ? ((winTrades.length / closedTrades.length) * 100).toFixed(0) : 0;
+
+    if (countTag) {
+        if (trades.length > 0) {
+            countTag.innerText = `近 6 個月觸發 ${trades.length} 筆模擬交易 | 已平倉勝率: ${winRate}% (${winTrades.length}勝 / ${closedTrades.length - winTrades.length}敗)`;
+        } else {
+            countTag.innerText = "近 6 個月無完整買賣共振交易區間";
+        }
+    }
+
+    if (trades.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="p-4 text-slate-500">近 6 個月無觸發買入共振號誌</td></tr>`;
         return;
     }
 
-    let html = "";
-    for (let i = 0; i < maxRows; i++) {
-        const buy = buySignals[i];
-        const sell = sellSignals[i];
+    // 3. 倒序排列 (最新交易排上方) 繪製表格
+    const displayTrades = [...trades].reverse();
 
-        html += `<tr class="hover:bg-slate-800/40 transition">`;
-
-        // 左欄：買入決策訊號
-        if (buy) {
-            html += `
-                <td class="p-2.5 text-slate-400 text-xs text-left">${buy.date}</td>
-                <td class="p-2.5 text-slate-200 font-bold">${buy.close}</td>
-                <td class="p-2.5">${getBadgeTagHtml(buy.decision.signalType, buy.decision.badgeText)}</td>
-            `;
+    tbody.innerHTML = displayTrades.map(trade => {
+        const retColor = trade.retPct > 0 ? "text-emerald-400 font-bold" : (trade.retPct < 0 ? "text-rose-400 font-bold" : "text-slate-400");
+        const retSign = trade.retPct >= 0 ? `+${trade.retPct}%` : `${trade.retPct}%`;
+        
+        const buyBadgeHtml = `<span class="inline-block px-2 py-0.5 rounded text-[11px] border bg-emerald-950/60 text-emerald-300 border-emerald-800/60">${trade.buyBadge}</span>`;
+        
+        let sellBadgeHtml = "";
+        if (trade.isOpen) {
+            sellBadgeHtml = `<span class="inline-block px-2 py-0.5 rounded text-[11px] border bg-sky-950/60 text-sky-300 border-sky-800/60 font-semibold">持股中 (${retSign})</span>`;
         } else {
-            html += `
-                <td class="p-2.5 text-slate-600 text-xs text-left">--</td>
-                <td class="p-2.5 text-slate-600">--</td>
-                <td class="p-2.5 text-slate-600">--</td>
+            const sellColorClass = trade.retPct >= 0 ? "bg-emerald-950/40 text-emerald-300 border-emerald-800/50" : "bg-rose-950/40 text-rose-300 border-rose-800/50";
+            sellBadgeHtml = `
+                <div class="flex items-center justify-center space-x-1.5">
+                    <span class="inline-block px-2 py-0.5 rounded text-[11px] border ${sellColorClass}">${trade.sellBadge}</span>
+                    <span class="text-xs ${retColor}">(${retSign})</span>
+                </div>
             `;
         }
 
-        // 右欄：賣出決策訊號
-        if (sell) {
-            html += `
-                <td class="p-2.5 text-slate-400 text-xs text-left border-l border-slate-700/60">${sell.date}</td>
-                <td class="p-2.5 text-slate-200 font-bold">${sell.close}</td>
-                <td class="p-2.5">${getBadgeTagHtml(sell.decision.signalType, sell.decision.badgeText)}</td>
-            `;
-        } else {
-            html += `
-                <td class="p-2.5 text-slate-600 text-xs text-left border-l border-slate-700/60">--</td>
-                <td class="p-2.5 text-slate-600">--</td>
-                <td class="p-2.5 text-slate-600">--</td>
-            `;
-        }
-
-        html += `</tr>`;
-    }
-
-    tbody.innerHTML = html;
+        return `
+            <tr class="hover:bg-slate-800/40 transition">
+                <!-- 買入側 -->
+                <td class="p-2.5 text-slate-400 text-xs text-left">${trade.buyDate}</td>
+                <td class="p-2.5 text-slate-200 font-bold">${trade.buyPrice}</td>
+                <td class="p-2.5">${buyBadgeHtml}</td>
+                
+                <!-- 賣出側 (依據圖片格式分隔) -->
+                <td class="p-2.5 text-slate-400 text-xs text-left border-l border-slate-700/60">${trade.sellDate}</td>
+                <td class="p-2.5 text-slate-200 font-bold">${trade.sellPrice}</td>
+                <td class="p-2.5">${sellBadgeHtml}</td>
+            </tr>
+        `;
+    }).join("");
 }
 
 // 樣式與格式化輔助函式
@@ -264,13 +313,4 @@ function getSignalBorderStyle(type) {
         case "WARN": return "border-amber-500 shadow-amber-950/30";
         default: return "border-sky-500/60 shadow-sky-950/20";
     }
-}
-
-function getBadgeTagHtml(type, text) {
-    let colorClass = "bg-slate-800 text-slate-400 border-slate-700";
-    if (type === "BUY") colorClass = "bg-emerald-950/60 text-emerald-300 border-emerald-800/60";
-    else if (type === "SELL") colorClass = "bg-rose-950/60 text-rose-300 border-rose-800/60";
-    else if (type === "WARN") colorClass = "bg-amber-950/60 text-amber-300 border-amber-800/60";
-
-    return `<span class="inline-block px-2 py-0.5 rounded text-[11px] border ${colorClass}">${text}</span>`;
 }
