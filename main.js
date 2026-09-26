@@ -1,6 +1,5 @@
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbw0aLFtVlWNgFjxxiYMZZEIyE7nDFc_Lkpp6Eo_gdzuL1gtLydSSrQ53GN6jQvVCBOC/exec";
 
-// 執行股票分析主程式
 async function analyzeStock() {
     const codeInput = document.getElementById("stockInput");
     const code = codeInput ? codeInput.value.trim() : "2330";
@@ -17,7 +16,6 @@ async function analyzeStock() {
             return;
         }
 
-        // 股票名稱與代碼渲染 (圖檔1_3排版)
         const titleContainer = document.getElementById("stockTitle");
         if (titleContainer) {
             const engName = rawData.englishName || (code === '2330' ? 'Taiwan Semiconductor<br>Manufacturng Co Ltd' : (rawData.name || ''));
@@ -43,11 +41,9 @@ async function analyzeStock() {
     }
 }
 
-// 更新整體 UI 介面
 function updateUI(res, isBefore9AM) {
-    const { current, delta, decision, advRiskControl, historySignals } = res;
+    const { current, delta, decision, advRiskControl, historySignals, totalTScoresCount } = res;
 
-    // 標籤依開盤時間動態切換 (T / T-1)
     const priceLabel = document.getElementById("priceLabel");
     const volumeLabel = document.getElementById("volumeLabel");
     
@@ -59,7 +55,6 @@ function updateUI(res, isBefore9AM) {
 
     document.getElementById("decisionDesc").innerText = `${decision.name}：${decision.desc}`;
 
-    // 決策 Badge 與外框顏色
     const badge = document.getElementById("signalBadge");
     const cardSignal = document.getElementById("cardSignal");
     
@@ -76,13 +71,11 @@ function updateUI(res, isBefore9AM) {
         badge.className = "w-full py-2.5 px-3 rounded-lg border border-sky-500/50 bg-sky-500/10 text-sky-300 text-xs md:text-sm font-medium text-center tracking-wide";
     }
 
-    // 四指標 T-Score 卡片
     updateCard("sdv", current.SDV, getLevelDesc("SDV", current.SDV));
     updateCard("vdv", current.VDV, getLevelDesc("VDV", current.VDV));
     updateCard("adv", current.ADV, getLevelDesc("ADV", current.ADV));
     updateCard("bdv", current.BDV, getLevelDesc("BDV", current.BDV));
 
-    // ADV 移動風控
     document.getElementById("advStopLossMode").innerText = advRiskControl.stopLossMode;
     document.getElementById("advStopLossRule").innerText = advRiskControl.stopLossRule;
     
@@ -94,7 +87,7 @@ function updateUI(res, isBefore9AM) {
         tpAlertElem.className = "text-sm font-semibold text-emerald-400";
     }
 
-    // 渲染 Δ 動能矩陣
+    // 動態矩陣
     const tbody = document.getElementById("deltaMatrixBody");
     tbody.innerHTML = `
         ${renderRow("SDV (股價離差)", current.SDV, delta.SDV_1, delta.SDV_5, delta.SDV_10)}
@@ -103,17 +96,21 @@ function updateUI(res, isBefore9AM) {
         ${renderRow("BDV (帶寬離差)", current.BDV, delta.BDV_1, delta.BDV_5, delta.BDV_10)}
     `;
 
-    // 渲染歷史系統決策訊號 (6個月內) - 雙欄併排
-    renderHistorySignals(historySignals);
+    // 歷史決策訊號表格渲染
+    renderHistorySignals(historySignals, totalTScoresCount);
 }
 
-// 渲染歷史訊號表格
-function renderHistorySignals(signals) {
+function renderHistorySignals(signals, totalCount) {
     const historyBody = document.getElementById("historyMatrixBody");
+    const countTag = document.getElementById("historyCountTag");
     if (!historyBody) return;
 
+    if (countTag) {
+        countTag.innerText = `已掃描 ${Math.min(totalCount, 120)} 個交易日，共補獲 ${signals.length} 筆關鍵訊號`;
+    }
+
     if (!signals || signals.length === 0) {
-        historyBody.innerHTML = `<tr><td colspan="6" class="p-4 text-slate-500">近 6 個月內無觸發特殊系統決策訊號</td></tr>`;
+        historyBody.innerHTML = `<tr><td colspan="6" class="p-4 text-slate-500">近 6 個月內無觸發特殊決策或轉折訊號</td></tr>`;
         return;
     }
 
@@ -142,13 +139,11 @@ function renderHistorySignals(signals) {
     historyBody.innerHTML = html;
 }
 
-// 輔助函式：更新單一指標卡片
 function updateCard(type, val, desc) {
     document.getElementById(`${type}Value`).innerText = val.toFixed(1);
     document.getElementById(`${type}Status`).innerText = desc;
 }
 
-// 輔助函式：渲染動能矩陣單一橫列
 function renderRow(label, curr, d1, d5, d10) {
     const formatD = (val) => {
         const color = val > 0 ? "text-rose-400" : val < 0 ? "text-emerald-400" : "text-slate-400";
@@ -166,7 +161,6 @@ function renderRow(label, curr, d1, d5, d10) {
     `;
 }
 
-// 輔助函式：轉換 T-Score 區間狀態描述
 function getLevelDesc(type, val) {
     if (val >= 70) return "≥70 極致超買/暴甩頂點";
     if (val >= 60) return "60~69 強勢延伸/放量擴張";
@@ -176,5 +170,4 @@ function getLevelDesc(type, val) {
     return "<30 極致超賣/Squeeze臨界";
 }
 
-// 頁面載入完成後自動執行
 window.onload = () => analyzeStock();

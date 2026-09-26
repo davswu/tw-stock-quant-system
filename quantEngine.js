@@ -101,7 +101,7 @@ class QuantDecisionEngine {
     this.tScores = tScoresHistory.filter(d => d !== null);
   }
 
-  // 取得最新一日的分析與歷史訊號彙整
+  // 取得最新一日分析與歷史決策
   getLatestAnalysis() {
     this.calculateTScores();
     const ts = this.tScores;
@@ -123,18 +123,19 @@ class QuantDecisionEngine {
 
     const decision = this.matchDecisionMatrix(t, delta);
     const advRiskControl = this.evaluateADVRiskControl(t, delta);
-    const historySignals = this.getHistoryAnalysis(120); // 預設回溯 120 個交易日 (約 6 個月)
+    const historySignals = this.getHistoryAnalysis(120); // 120 交易日 (~ 6個月)
 
     return {
       current: t,
       delta: delta,
       decision: decision,
       advRiskControl: advRiskControl,
-      historySignals: historySignals
+      historySignals: historySignals,
+      totalTScoresCount: len
     };
   }
 
-  // 掃描近 N 個交易日內所有非常態 (非 NEUTRAL) 的觸發訊號
+  // 掃描近 N 個交易日歷史訊號 (包含核心矩陣 + 極端轉折監控)
   getHistoryAnalysis(lookbackDays = 120) {
     const ts = this.tScores;
     const len = ts.length;
@@ -157,18 +158,33 @@ class QuantDecisionEngine {
       };
 
       const decision = this.matchDecisionMatrix(t, delta);
+
+      // 情況 A：觸發核心 5 大決策矩陣
       if (decision.action !== "NEUTRAL") {
         signals.push({
           date: t.date,
           close: t.close,
           decision: decision
         });
+      } 
+      // 情況 B：位階極值轉折監控 (確保歷史視窗不會空白)
+      else if (t.SDV >= 65 && delta.SDV_1 <= -2.5) {
+        signals.push({
+          date: t.date,
+          close: t.close,
+          decision: { action: "HIGH_PIVOT", name: "高檔轉折", signal: "警戒拉回", color: "red", desc: "價格進入高位階超買區，單日動能向下彎頭。" }
+        });
+      } else if (t.SDV <= 35 && delta.SDV_1 >= 2.5) {
+        signals.push({
+          date: t.date,
+          close: t.close,
+          decision: { action: "LOW_PIVOT", name: "低檔止跌", signal: "反彈買點", color: "green", desc: "價格進入低位階超賣區，單日動能向上強彈。" }
+        });
       }
     }
-    return signals.reverse(); // 日期由新至舊排序
+    return signals.reverse();
   }
 
-  // 評估 ADV 移動風控
   evaluateADVRiskControl(t, delta) {
     let stopLossMode = "";
     let stopLossRule = "";
@@ -197,11 +213,9 @@ class QuantDecisionEngine {
     return { stopLossMode, stopLossRule, takeProfitAlert, action };
   }
 
-  // 系統決策矩陣比對
   matchDecisionMatrix(t, d) {
     const { SDV, VDV, ADV, BDV } = t;
 
-    // 1. 蓄勢突破
     if (ADV >= 40 && ADV <= 50 && BDV < 40 &&
         SDV >= 50 && SDV <= 60 && VDV >= 60 &&
         d.SDV_10 >= 3 && d.VDV_10 > 0 && d.ADV_10 <= 0 && d.BDV_10 <= -3 &&
@@ -210,7 +224,6 @@ class QuantDecisionEngine {
       return { action: "BUY_FIRST", name: "蓄勢突破", signal: "買進 (首筆)", color: "green", desc: "變盤蓄勢完成，主力放量衝過中軸，啟動強烈突破。" };
     }
 
-    // 2. 順勢拉回
     if (ADV >= 40 && ADV <= 50 && BDV >= 50 && BDV <= 60 &&
         SDV >= 50 && SDV <= 59 && VDV < 40 &&
         d.SDV_10 >= 3 && d.VDV_10 >= 3 && d.BDV_10 >= 3 &&
@@ -219,21 +232,18 @@ class QuantDecisionEngine {
       return { action: "BUY_ADD", name: "順勢拉回", signal: "加碼 (二次)", color: "green", desc: "主升段拉回無量洗盤結束，出現止跌陽線重啟攻勢。" };
     }
 
-    // 3. 極致超跌
     if (ADV >= 70 && BDV >= 70 && SDV < 30 && VDV >= 70 &&
         d.SDV_10 <= -10 && d.VDV_10 >= 10 && d.ADV_10 >= 10 && d.BDV_10 >= 10 &&
         d.SDV_1 >= 3 && d.ADV_1 <= -3 && d.BDV_1 <= -3) {
       return { action: "BUY_BOTTOM", name: "極致超跌", signal: "抄底買進", color: "green", desc: "恐慌盤極致釋放與天量換手，出現長下影止跌訊號。" };
     }
 
-    // 4. 過熱高潮
     if (ADV >= 70 && BDV >= 70 && SDV >= 70 && (VDV >= 70 || VDV < 40) &&
         d.SDV_10 >= 10 && d.SDV_5 < 3 && d.VDV_5 <= -3 &&
         d.SDV_1 <= -3 && d.BDV_1 <= -3) {
       return { action: "EXIT_FULL_PROFIT", name: "過熱高潮", signal: "大獲利平倉", color: "red", desc: "情緒高潮與帶寬頂點，動能急遽放緩，拐點反轉離場。" };
     }
 
-    // 5. 破位停損
     if (ADV >= 60 && BDV >= 50 && SDV < 50 && VDV >= 60 &&
         d.SDV_10 <= -10 && d.VDV_10 >= 3 && d.ADV_10 >= 3 && d.BDV_10 >= 3 &&
         d.SDV_5 <= -3 && d.VDV_5 >= 3 && d.ADV_5 >= 3 && d.BDV_5 >= 3 &&
@@ -241,7 +251,6 @@ class QuantDecisionEngine {
       return { action: "STOP_LOSS", name: "破位停損", signal: "完全停損離場", color: "red", desc: "跌破多空中軸，伴隨恐慌殺多賣壓，趨勢轉空停損。" };
     }
 
-    // 常態/中性
     return {
       action: "NEUTRAL",
       name: SDV >= 50 ? "多頭控盤/常態運作" : "空頭控盤/盤整觀望",
