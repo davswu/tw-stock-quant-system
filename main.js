@@ -1,5 +1,5 @@
-// 已更新最新部署之 GAS API 端點網址
-const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx69HynfFUSdL5PpmUN6dxrU7K66Ms__wsQpwfLrrF6aCWS6jHuanv62O0LL6jCapfm/exec";
+// 最新更新之 GAS API 部署網址
+const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzk4k29HgzQx3AVVTA77ZaCzRevPyKdtvz56J_P-URJFHLZIaOt3zU8XT4UVAlfGait/exec";
 
 async function analyzeStock() {
     const codeInput = document.getElementById("stockInput");
