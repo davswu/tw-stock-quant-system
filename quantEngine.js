@@ -1,231 +1,139 @@
 /**
- * QuantDecisionEngine - 對數標準化 (T-Score) 與共振決策矩陣運算引擎
+ * QuantEngine.js - 量化決策與四層共振邏輯引擎
  */
-class QuantDecisionEngine {
-    constructor(rawData) {
-        this.rawData = rawData || [];
-        this.tScores = [];
-    }
 
-    /**
-     * 計算真實波動區間 (TR)、ATR(14) 與布林帶寬 (Bandwidth 20)
-     */
-    calculateDerivedMetrics() {
-        const len = this.rawData.length;
-        let trs = [];
-        
-        for (let i = 0; i < len; i++) {
-            if (i === 0) {
-                trs.push(this.rawData[i].high - this.rawData[i].low);
-            } else {
-                const h = this.rawData[i].high;
-                const l = this.rawData[i].low;
-                const prevC = this.rawData[i - 1].close;
-                trs.push(Math.max(h - l, Math.abs(h - prevC), Math.abs(l - prevC)));
-            }
-        }
+// 1. 六大位階與語意定義
+export function getMetricLevel(val) {
+  if (val >= 70) return { zone: '極致超買/爆量/劇烈/擴張', code: 'EXTREME_HIGH', color: 'bg-red-500 text-white' };
+  if (val >= 60) return { zone: '強勢/放量/擴張', code: 'STRONG_HIGH', color: 'bg-rose-100 text-rose-700 border-rose-300' };
+  if (val >= 50) return { zone: '中性偏多/常態', code: 'NEUTRAL_HIGH', color: 'bg-emerald-100 text-emerald-700 border-emerald-300' };
+  if (val >= 40) return { zone: '中性偏空/微縮/收縮', code: 'NEUTRAL_LOW', color: 'bg-sky-100 text-sky-700 border-sky-300' };
+  if (val >= 30) return { zone: '低迷/高度擠壓', code: 'WEAK_LOW', color: 'bg-slate-100 text-slate-700 border-slate-300' };
+  return { zone: '極致超賣/窒息/Squeeze', code: 'EXTREME_LOW', color: 'bg-green-600 text-white' };
+}
 
-        let atrs = [];
-        for (let i = 0; i < len; i++) {
-            if (i < 13) {
-                atrs.push(null);
-            } else {
-                const sum = trs.slice(i - 13, i + 1).reduce((a, b) => a + b, 0);
-                atrs.push(sum / 14);
-            }
-        }
+// 2. 核心訊號決策分析器
+export function evaluateTradingSignal(metrics) {
+  const { SDV, VDV, ADV, BDV, dSDV_1, dVDV_1, dSDV_5, dVDV_5, prevSDV, is5DayPullback, is1DayRebound } = metrics;
 
-        let bws = [];
-        for (let i = 0; i < len; i++) {
-            if (i < 19) {
-                bws.push(null);
-            } else {
-                const sliceC = this.rawData.slice(i - 19, i + 1).map(d => d.close);
-                const mean = sliceC.reduce((a, b) => a + b, 0) / 20;
-                const variance = sliceC.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / 20;
-                const std = Math.sqrt(variance);
-                bws.push(mean === 0 ? 0 : (4 * std) / mean);
-            }
-        }
+  // --- 四層過濾架構分析 ---
+  
+  // 第一層：環境過濾 (ADV + BDV)
+  let layer1Status = "環境中性";
+  if (ADV >= 40 && ADV <= 50 && BDV < 40) layer1Status = "低波動/壓縮變盤區";
+  else if (ADV >= 70 && BDV >= 70) layer1Status = "極致高波動/過熱擴張區";
+  else if (ADV >= 60 && BDV >= 50) layer1Status = "高波動/張力擴大區";
 
-        for (let i = 0; i < len; i++) {
-            this.rawData[i].atr = atrs[i];
-            this.rawData[i].bandwidth = bws[i];
-        }
-    }
+  // 第二層：方向與資金 (SDV + VDV)
+  let layer2Status = "量價沉悶";
+  if (SDV >= 50 && SDV <= 60 && VDV >= 60) layer2Status = "主力進駐/多頭初啟";
+  else if (SDV >= 70 && VDV >= 70) layer2Status = "爆量衝頂/過熱風險";
+  else if (SDV < 30 && VDV >= 70) layer2Status = "恐慌爆量換手/潛在底部";
+  else if (SDV < 50 && VDV >= 60) layer2Status = "帶量殺多/破位威脅";
 
-    /**
-     * 計算 30 日滾動對數標準化 T-Score (SDV, VDV, ADV, BDV)
-     */
-    calculateTScores(windowSize = 30) {
-        this.calculateDerivedMetrics();
-        const len = this.rawData.length;
-        let tScoresHistory = [];
+  // 第三層 & 第四層：多週期動能驗證[cite: 1]
+  const layer3Passed = Math.abs(dSDV_1) >= 3 || Math.abs(dVDV_1) >= 3;
+  const layer4Passed = Math.abs(dSDV_5) >= 5 || Math.abs(dVDV_5) >= 5;
 
-        for (let i = 0; i < len; i++) {
-            if (i < windowSize + 18) {
-                tScoresHistory.push(null);
-                continue;
-            }
+  // --- 8 大進場與出場觸發模式判定[cite: 1] ---
+  let result = {
+    action: "觀望 / 持續監控",
+    mode: "無特定模式",
+    actionType: "NEUTRAL", // BUY, ADD, BOTTOM, REDUCE, EXIT_PROFIT, EXIT_STOP, STOP_LOSS
+    badgeColor: "bg-gray-100 text-gray-800",
+    layer1Status,
+    layer2Status,
+    layer3Passed,
+    layer4Passed
+  };
 
-            const window = this.rawData.slice(i - windowSize + 1, i + 1);
-            const lnP = window.map(d => Math.log(Math.max(d.close, 0.0001)));
-            const lnV = window.map(d => Math.log(Math.max(d.volume, 1)));
-            const lnA = window.map(d => Math.log(Math.max(d.atr, 0.0001)));
-            const lnB = window.map(d => Math.log(Math.max(d.bandwidth, 0.0001)));
+  // 1. 買進 - 蓄勢突破[cite: 1]
+  if (ADV >= 40 && ADV <= 50 && BDV < 40 && SDV >= 50 && SDV <= 60 && VDV >= 60 && dSDV_1 >= 3 && dVDV_1 >= 3) {
+    return {
+      ...result,
+      action: "買進 (首筆)",
+      mode: "蓄勢突破",
+      actionType: "BUY",
+      badgeColor: "bg-emerald-600 text-white"
+    };
+  }
 
-            const calcTS = (val, lnArray) => {
-                const lnVal = Math.log(Math.max(val, 0.0001));
-                const mu = lnArray.reduce((a, b) => a + b, 0) / lnArray.length;
-                const variance = lnArray.reduce((a, b) => a + Math.pow(b - mu, 2), 0) / lnArray.length;
-                const sigma = Math.sqrt(variance);
-                if (sigma === 0) return 50;
-                return Math.min(100, Math.max(0, 10 * ((lnVal - mu) / sigma) + 50));
-            };
+  // 2. 加碼 - 順勢拉回[cite: 1]
+  if (ADV >= 40 && ADV <= 50 && BDV >= 50 && BDV <= 60 && SDV >= 50 && SDV <= 59 && VDV < 40 && is5DayPullback && is1DayRebound) {
+    return {
+      ...result,
+      action: "加碼 (二次)",
+      mode: "順勢拉回",
+      actionType: "ADD",
+      badgeColor: "bg-teal-600 text-white"
+    };
+  }
 
-            const curr = this.rawData[i];
-            tScoresHistory.push({
-                date: curr.date,
-                close: curr.close,
-                volume: curr.volume,
-                SDV: calcTS(curr.close, lnP),
-                VDV: calcTS(curr.volume, lnV),
-                ADV: calcTS(curr.atr, lnA),
-                BDV: calcTS(curr.bandwidth, lnB)
-            });
-        }
+  // 3. 買進 - 假跌破掃蕩[cite: 1]
+  if (ADV >= 50 && ADV <= 60 && BDV < 50 && prevSDV < 50 && SDV >= 50 && (VDV < 40 || VDV >= 60)) {
+    return {
+      ...result,
+      action: "買进 (掃蕩試單)",
+      mode: "假跌破掃蕩",
+      actionType: "BUY",
+      badgeColor: "bg-green-600 text-white"
+    };
+  }
 
-        this.tScores = tScoresHistory.filter(d => d !== null);
-        return this.tScores;
-    }
+  // 4. 抄底 - 極致超跌[cite: 1]
+  if (ADV >= 70 && BDV >= 70 && SDV < 30 && VDV >= 70) {
+    return {
+      ...result,
+      action: "買進 (極致抄底)",
+      mode: "極致超跌",
+      actionType: "BOTTOM",
+      badgeColor: "bg-blue-600 text-white"
+    };
+  }
 
-    /**
-     * 取得最新交易日分析結果
-     */
-    getLatestAnalysis() {
-        if (this.tScores.length === 0) this.calculateTScores();
-        const ts = this.tScores;
-        const len = ts.length;
-        if (len < 11) return null;
+  // 5. 平倉 - 過熱高潮[cite: 1]
+  if (ADV >= 70 && BDV >= 70 && SDV >= 70 && (VDV >= 70 || VDV < 40)) {
+    return {
+      ...result,
+      action: "大獲利平倉",
+      mode: "過熱高潮",
+      actionType: "EXIT_PROFIT",
+      badgeColor: "bg-purple-600 text-white"
+    };
+  }
 
-        const t = ts[len - 1];
-        const delta = this.computeDelta(t, ts[len - 2], ts[len - 6], ts[len - 11]);
-        return {
-            current: t,
-            delta: delta,
-            decision: this.matchDecisionMatrix(t, delta),
-            advRiskControl: this.evaluateADVRiskControl(t, delta)
-        };
-    }
+  // 6. 減碼 - 動能背離[cite: 1]
+  if (ADV >= 50 && ADV <= 60 && BDV >= 60 && BDV <= 70 && SDV >= 60 && VDV < 40) {
+    return {
+      ...result,
+      action: "減碼平倉 50%",
+      mode: "動能背離",
+      actionType: "REDUCE",
+      badgeColor: "bg-amber-500 text-white"
+    };
+  }
 
-    /**
-     * 取得近 N 交易日歷史決策訊號
-     */
-    getHistoricalDecisionSignals(tradingDays = 120) {
-        if (this.tScores.length === 0) this.calculateTScores();
-        const ts = this.tScores;
-        const len = ts.length;
-        if (len < 11) return [];
+  // 7. 賣出 - 假突破避險[cite: 1]
+  if (ADV >= 60 && BDV >= 60 && BDV <= 70 && prevSDV > 60 && SDV < 50) {
+    return {
+      ...result,
+      action: "即時賣出離場",
+      mode: "假突破避險",
+      actionType: "EXIT_STOP",
+      badgeColor: "bg-orange-600 text-white"
+    };
+  }
 
-        let historySignals = [];
-        const startIndex = Math.max(10, len - tradingDays);
+  // 8. 停損 - 破位停損[cite: 1]
+  if (ADV >= 60 && BDV >= 50 && SDV < 50 && VDV >= 60) {
+    return {
+      ...result,
+      action: "完全停損離場",
+      mode: "破位停損",
+      actionType: "STOP_LOSS",
+      badgeColor: "bg-red-700 text-white"
+    };
+  }
 
-        for (let i = startIndex; i < len; i++) {
-            const t = ts[i];
-            const delta = this.computeDelta(t, ts[i - 1], ts[i - 5], ts[i - 10]);
-            const decision = this.matchDecisionMatrix(t, delta);
-            const advRisk = this.evaluateADVRiskControl(t, delta);
-
-            historySignals.push({
-                date: t.date,
-                close: t.close,
-                volume: t.volume,
-                SDV: t.SDV,
-                VDV: t.VDV,
-                ADV: t.ADV,
-                BDV: t.BDV,
-                decision: decision,
-                riskAlert: advRisk.takeProfitAlert
-            });
-        }
-        return historySignals.reverse();
-    }
-
-    computeDelta(t, t_1, t_5, t_10) {
-        return {
-            SDV_1: t.SDV - t_1.SDV, SDV_5: t.SDV - t_5.SDV, SDV_10: t.SDV - t_10.SDV,
-            VDV_1: t.VDV - t_1.VDV, VDV_5: t.VDV - t_5.VDV, VDV_10: t.VDV - t_10.VDV,
-            ADV_1: t.ADV - t_1.ADV, ADV_5: t.ADV - t_5.ADV, ADV_10: t.ADV - t_10.ADV,
-            BDV_1: t.BDV - t_1.BDV, BDV_5: t.BDV - t_5.BDV, BDV_10: t.BDV - t_10.BDV
-        };
-    }
-
-    evaluateADVRiskControl(t, delta) {
-        let stopLossMode = "", stopLossRule = "", takeProfitAlert = "常態監控中", action = "HOLD";
-
-        if (t.ADV < 40) {
-            stopLossMode = "低波動蓄勢期（窄停損）";
-            stopLossRule = "進場價 -2.0% 或跌破關鍵位 (SDV < 45)";
-        } else if (t.ADV <= 60) {
-            stopLossMode = "常態順勢期（標準停損）";
-            stopLossRule = "進場價 -5.0% 或 -2.0 × ATR 防線";
-        } else {
-            stopLossMode = "高波動爆發期（移動緊縮停損）";
-            stopLossRule = "自波段最高價回檔 -3.0% (Trailing Stop)";
-        }
-
-        if (t.SDV >= 65 && t.ADV >= 70 && delta.ADV_1 <= -3.0) {
-            takeProfitAlert = "觸發【過熱噴發拐點停利 (Blow-off Top)】";
-            action = "EXIT_FULL";
-        } else if (t.SDV >= 70 && t.BDV >= 70 && delta.SDV_1 <= -3.0) {
-            takeProfitAlert = "觸發【雙重離差過熱防線 (SDV + BDV 共振)】";
-            action = "EXIT_FULL";
-        }
-
-        return { stopLossMode, stopLossRule, takeProfitAlert, action };
-    }
-
-    matchDecisionMatrix(t, d) {
-        const { SDV, VDV, ADV, BDV } = t;
-
-        if (ADV >= 40 && ADV <= 50 && BDV < 40 && SDV >= 50 && SDV <= 60 && VDV >= 60 &&
-            d.SDV_10 >= 3 && d.VDV_10 > 0 && d.ADV_10 <= 0 && d.BDV_10 <= -3 &&
-            d.SDV_5 >= 3 && d.VDV_5 >= 3 && d.BDV_5 <= -3 &&
-            d.SDV_1 >= 3 && d.VDV_1 >= 3 && d.ADV_1 > 0 && d.BDV_1 >= 3) {
-            return { action: "BUY_FIRST", name: "蓄勢突破", signal: "買進 (首筆)", color: "green", desc: "變盤蓄勢完成，主力放量衝過中軸，啟動強烈突破。" };
-        }
-
-        if (ADV >= 40 && ADV <= 50 && BDV >= 50 && BDV <= 60 && SDV >= 50 && SDV <= 59 && VDV < 40 &&
-            d.SDV_10 >= 3 && d.VDV_10 >= 3 && d.BDV_10 >= 3 &&
-            d.SDV_5 >= -3 && d.SDV_5 <= 0 && d.VDV_5 <= -3 && d.ADV_5 <= 0 &&
-            d.SDV_1 >= 3 && d.VDV_1 > 0 && d.BDV_1 >= 0) {
-            return { action: "BUY_ADD", name: "順勢拉回", signal: "加碼 (二次)", color: "green", desc: "主升段拉回無量洗盤結束，出現止跌陽線重啟攻勢。" };
-        }
-
-        if (ADV >= 70 && BDV >= 70 && SDV < 30 && VDV >= 70 &&
-            d.SDV_10 <= -10 && d.VDV_10 >= 10 && d.ADV_10 >= 10 && d.BDV_10 >= 10 &&
-            d.SDV_1 >= 3 && d.ADV_1 <= -3 && d.BDV_1 <= -3) {
-            return { action: "BUY_BOTTOM", name: "極致超跌", signal: "抄底買進", color: "green", desc: "恐慌盤極致釋放與天量換手，出現長下影止跌訊號。" };
-        }
-
-        if (ADV >= 70 && BDV >= 70 && SDV >= 70 && (VDV >= 70 || VDV < 40) &&
-            d.SDV_10 >= 10 && d.SDV_5 < 3 && d.VDV_5 <= -3 && d.SDV_1 <= -3 && d.BDV_1 <= -3) {
-            return { action: "EXIT_FULL_PROFIT", name: "過熱高潮", signal: "大獲利平倉", color: "red", desc: "情緒高潮與帶寬頂點，動能急遽放緩，拐點反轉離場。" };
-        }
-
-        if (ADV >= 60 && BDV >= 50 && SDV < 50 && VDV >= 60 &&
-            d.SDV_10 <= -10 && d.VDV_10 >= 3 && d.ADV_10 >= 3 && d.BDV_10 >= 3 &&
-            d.SDV_5 <= -3 && d.VDV_5 >= 3 && d.ADV_5 >= 3 && d.BDV_5 >= 3 &&
-            d.SDV_1 <= -3 && d.VDV_1 >= 3 && d.ADV_1 >= 3 && d.BDV_1 >= 3) {
-            return { action: "STOP_LOSS", name: "破位停損", signal: "完全停損離場", color: "red", desc: "跌破多空中軸，伴隨恐慌殺多賣壓，趨勢轉空停損。" };
-        }
-
-        return {
-            action: "NEUTRAL",
-            name: SDV >= 50 ? "多頭控盤/常態運作" : "空頭控盤/盤整觀望",
-            signal: SDV >= 50 ? "續抱 / 觀望" : "觀望 / 空手",
-            color: "blue",
-            desc: "市場指標處於標準常態區間，無特殊極端共振觸發訊號。"
-        };
-    }
+  return result;
 }

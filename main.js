@@ -1,156 +1,157 @@
-// 最新更新之 GAS API 部署網址
-const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzk4k29HgzQx3AVVTA77ZaCzRevPyKdtvz56J_P-URJFHLZIaOt3zU8XT4UVAlfGait/exec";
+/**
+ * main.js - 前端控制與互動邏輯
+ */
+import { evaluateTradingSignal, getMetricLevel } from './quantEngine.js';
 
-async function analyzeStock() {
-    const codeInput = document.getElementById("stockInput");
-    const code = codeInput ? codeInput.value.trim() : "2330";
-    if (!code) return;
+// 模擬最新系統與歷史紀錄資料
+const mockCurrentData = {
+  symbol: "2330.TW",
+  date: "2026-09-29",
+  SDV: 56, VDV: 64, ADV: 45, BDV: 32,
+  dSDV_1: 4, dVDV_1: 5, dADV_1: 1, dBDV_1: -2,
+  dSDV_5: 8, dVDV_5: 12, dADV_5: -3, dBDV_5: -8,
+  dSDV_10: 14, dVDV_10: 18, dADV_10: -5, dBDV_10: -12,
+  prevSDV: 52, is5DayPullback: false, is1DayRebound: true
+};
 
-    document.getElementById("decisionDesc").innerText = `正在抓取 ${code} 即時行情資料...`;
+const mockHistoryLogs = [
+  {
+    id: "LOG_001", symbol: "2330.TW", date: "2026-09-29",
+    SDV: 56, VDV: 64, ADV: 45, BDV: 32, prevSDV: 52, dSDV_1: 4, dVDV_1: 5, dSDV_5: 8, dVDV_5: 12, dADV_5: -3, dBDV_5: -8
+  },
+  {
+    id: "LOG_002", symbol: "2454.TW", date: "2026-09-28",
+    SDV: 72, VDV: 75, ADV: 73, BDV: 71, prevSDV: 68, dSDV_1: 6, dVDV_1: 10, dSDV_5: 15, dVDV_5: 20, dADV_5: 12, dBDV_5: 15
+  },
+  {
+    id: "LOG_003", symbol: "2317.TW", date: "2026-09-25",
+    SDV: 45, VDV: 62, ADV: 62, BDV: 55, prevSDV: 52, dSDV_1: -8, dVDV_1: 8, dSDV_5: -10, dVDV_5: 14, dADV_5: 6, dBDV_5: 4
+  }
+];
 
-    try {
-        const res = await fetch(`${GAS_API_URL}?code=${encodeURIComponent(code)}`);
-        const rawData = await res.json();
+document.addEventListener('DOMContentLoaded', () => {
+  renderCurrentSignalDashboard(mockCurrentData);
+  renderHistoryTable(mockHistoryLogs);
+  setupFilterListeners();
+});
 
-        if (!rawData || rawData.status === "error" || !rawData.data || rawData.data.length === 0) {
-            document.getElementById("decisionDesc").innerText = rawData.message || `無法取得 ${code} 行情，請確認股票代碼。`;
-            return;
-        }
+// 渲染當前決策儀表板[cite: 1]
+function renderCurrentSignalDashboard(data) {
+  const signal = evaluateTradingSignal(data);
 
-        const engine = new QuantDecisionEngine(rawData.data);
-        const result = engine.getLatestAnalysis();
-        const history = engine.getHistoricalDecisionSignals(120);
+  // 1. Banner 更新[cite: 1]
+  const banner = document.getElementById('decisionBanner');
+  banner.className = `p-4 rounded-xl shadow-lg flex items-center justify-between ${signal.badgeColor}`;
+  banner.innerHTML = `
+    <div>
+      <span class="text-xs opacity-80 uppercase tracking-widest font-semibold block">當前系統決策觸發</span>
+      <h2 class="text-2xl font-bold">${signal.action} <span class="text-lg font-normal opacity-90">(${signal.mode})</span></h2>
+    </div>
+    <div class="text-right">
+      <span class="text-sm block">標的：${data.symbol}</span>
+      <span class="text-xs opacity-75">${data.date}</span>
+    </div>
+  `;
 
-        if (!result) {
-            document.getElementById("decisionDesc").innerText = "歷史資料筆數不足，無法計算對數 T-Score。";
-            return;
-        }
+  // 2. 共振狀態卡片[cite: 1]
+  document.getElementById('layer1Text').innerText = signal.layer1Status;
+  document.getElementById('layer2Text').innerText = signal.layer2Status;
 
-        updateUI(result, history, rawData.isBefore9AM, rawData.name, code);
-
-    } catch (err) {
-        console.error("API 連線失敗:", err);
-        document.getElementById("decisionDesc").innerText = "無法取得數據，請檢查網路連線或 CORS 設定。";
-    }
+  // 3. 指標位階 Gauge[cite: 1]
+  renderMetricBar('sdvGauge', data.SDV, 'SDV 股價');
+  renderMetricBar('vdvGauge', data.VDV, 'VDV 成交量');
+  renderMetricBar('advGauge', data.ADV, 'ADV 波動率');
+  renderMetricBar('bdvGauge', data.BDV, 'BDV 帶寬');
 }
 
-function updateUI(res, history, isBefore9AM, stockName, code) {
-    const { current, delta, decision, advRiskControl } = res;
+function renderMetricBar(elementId, val, label) {
+  const level = getMetricLevel(val);
+  const el = document.getElementById(elementId);
+  el.innerHTML = `
+    <div class="flex justify-between items-center mb-1">
+      <span class="font-medium text-slate-700">${label}: ${val}</span>
+      <span class="text-xs px-2 py-0.5 rounded border ${level.color}">${level.zone}</span>
+    </div>
+    <div class="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
+      <div class="h-2.5 rounded-full ${val >= 60 ? 'bg-rose-500' : val <= 40 ? 'bg-sky-500' : 'bg-emerald-500'}" style="width: ${Math.min(val, 100)}%"></div>
+    </div>
+  `;
+}
 
-    document.getElementById("stockTitle").innerHTML = `<span class="text-2xl font-extrabold text-white">${code}</span> <span class="text-sm text-slate-300 font-normal mt-1">${stockName || ''}</span>`;
-    document.getElementById("priceLabel").innerText = isBefore9AM ? "昨日 (T-1) 收盤價" : "當日 (T) 即時股價";
-    document.getElementById("volumeLabel").innerText = isBefore9AM ? "昨日 (T-1) 成交量" : "當日 (T) 即時成交量";
-    document.getElementById("stockPrice").innerText = `NT$ ${current.close.toFixed(2)}`;
-    document.getElementById("stockVolume").innerText = `${Number(current.volume).toLocaleString()} 張`;
+// 渲染歷史紀錄與 Accordion 詳情[cite: 1]
+function renderHistoryTable(logs) {
+  const tbody = document.getElementById('historyTableBody');
+  tbody.innerHTML = '';
 
-    document.getElementById("decisionDesc").innerText = `${decision.name}：${decision.desc}`;
-    const badge = document.getElementById("signalBadge");
-    const cardSignal = document.getElementById("cardSignal");
-    badge.innerText = `${decision.name} | ${decision.signal}`;
-
-    if (decision.color === "green") {
-        cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-emerald-500/80 flex flex-col justify-between shadow-lg shadow-emerald-500/10";
-        badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-center";
-    } else if (decision.color === "red") {
-        cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-rose-500/80 flex flex-col justify-between shadow-lg shadow-rose-500/10";
-        badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-rose-500/20 text-rose-400 border border-rose-500/30 text-center";
-    } else {
-        cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-sky-500/80 flex flex-col justify-between shadow-lg shadow-sky-500/10";
-        badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-sky-500/20 text-sky-400 border border-sky-500/30 text-center";
-    }
-
-    updateCard("sdv", current.SDV, getLevelDesc(current.SDV));
-    updateCard("vdv", current.VDV, getLevelDesc(current.VDV));
-    updateCard("adv", current.ADV, getLevelDesc(current.ADV));
-    updateCard("bdv", current.BDV, getLevelDesc(current.BDV));
-
-    document.getElementById("advStopLossMode").innerText = advRiskControl.stopLossMode;
-    document.getElementById("advStopLossRule").innerText = advRiskControl.stopLossRule;
+  logs.forEach((log) => {
+    const signal = evaluateTradingSignal(log);
     
-    const tpAlertElem = document.getElementById("advTakeProfitAlert");
-    tpAlertElem.innerText = advRiskControl.takeProfitAlert;
-    tpAlertElem.className = advRiskControl.action === "EXIT_FULL" 
-        ? "text-sm font-bold text-rose-400 bg-rose-950/50 p-2 rounded border border-rose-500/50 animate-pulse"
-        : "text-sm font-semibold text-emerald-400";
-
-    document.getElementById("deltaMatrixBody").innerHTML = `
-        ${renderRow("SDV (股價離差)", current.SDV, delta.SDV_1, delta.SDV_5, delta.SDV_10)}
-        ${renderRow("VDV (量能離差)", current.VDV, delta.VDV_1, delta.VDV_5, delta.VDV_10)}
-        ${renderRow("ADV (波動離差)", current.ADV, delta.ADV_1, delta.ADV_5, delta.ADV_10)}
-        ${renderRow("BDV (帶寬離差)", current.BDV, delta.BDV_1, delta.BDV_5, delta.BDV_10)}
+    // 主列[cite: 1]
+    const row = document.createElement('tr');
+    row.className = 'border-b hover:bg-slate-50 cursor-pointer transition';
+    row.innerHTML = `
+      <td class="p-3 text-sm">${log.date}<br><span class="font-semibold text-slate-600">${log.symbol}</span></td>
+      <td class="p-3"><span class="px-2.5 py-1 text-xs rounded font-medium ${signal.badgeColor}">${signal.action}</span></td>
+      <td class="p-3 text-sm font-medium text-slate-700">${signal.mode}</td>
+      <td class="p-3 text-xs font-mono">S:${log.SDV} | V:${log.VDV} | A:${log.ADV} | B:${log.BDV}</td>
+      <td class="p-3 text-xs font-mono text-slate-500">Δ1: ${log.dSDV_1 > 0 ? '+'+log.dSDV_1 : log.dSDV_1} | Δ5: ${log.dSDV_5}</td>
+      <td class="p-3 text-right"><button class="text-indigo-600 hover:text-indigo-900 text-xs font-semibold">展開共振檢核 ▼</button></td>
     `;
 
-    renderHistoryTable(history);
-}
-
-function updateCard(type, val, desc) {
-    document.getElementById(`${type}Value`).innerText = val.toFixed(1);
-    document.getElementById(`${type}Status`).innerText = desc;
-}
-
-function renderRow(label, curr, d1, d5, d10) {
-    const formatD = (val) => {
-        const color = val > 0 ? "text-rose-400" : val < 0 ? "text-emerald-400" : "text-slate-400";
-        const sign = val > 0 ? "+" : "";
-        return `<span class="${color}">${sign}${val.toFixed(1)}</span>`;
-    };
-    return `
-        <tr class="hover:bg-slate-700/30 transition">
-            <td class="p-3 text-left font-bold text-slate-300">${label}</td>
-            <td class="p-3 font-bold">${curr.toFixed(1)}</td>
-            <td class="p-3">${formatD(d1)}</td>
-            <td class="p-3">${formatD(d5)}</td>
-            <td class="p-3">${formatD(d10)}</td>
-        </tr>
+    // 折疊詳情層 (Accordion)[cite: 1]
+    const detailRow = document.createElement('tr');
+    detailRow.className = 'hidden bg-slate-50 border-b';
+    detailRow.innerHTML = `
+      <td colspan="6" class="p-4">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+          <div class="bg-white p-3 rounded border">
+            <span class="font-bold text-slate-500 block mb-1">第一層 (環境過濾)[cite: 1]</span>
+            <span>ADV+BDV: ${signal.layer1Status}</span>
+          </div>
+          <div class="bg-white p-3 rounded border">
+            <span class="font-bold text-slate-500 block mb-1">第二層 (方向與資金)[cite: 1]</span>
+            <span>SDV+VDV: ${signal.layer2Status}</span>
+          </div>
+          <div class="bg-white p-3 rounded border">
+            <span class="font-bold text-slate-500 block mb-1">第三層 (環境驗證)[cite: 1]</span>
+            <span>${signal.layer3Passed ? '✅ 波動張力延續' : '⚠️ 波動力道不足'}</span>
+          </div>
+          <div class="bg-white p-3 rounded border">
+            <span class="font-bold text-slate-500 block mb-1">第四層 (動能驗證)[cite: 1]</span>
+            <span>${signal.layer4Passed ? '✅ 中短期結構確立' : '⚠️ 動能結構分歧'}</span>
+          </div>
+        </div>
+      </td>
     `;
+
+    row.addEventListener('click', () => {
+      detailRow.classList.toggle('hidden');
+    });
+
+    tbody.appendChild(row);
+    tbody.appendChild(detailRow);
+  });
 }
 
-function renderHistoryTable(history) {
-    const tbody = document.getElementById("historyTableBody");
-    if (!tbody) return;
+// 多維度篩選器監聽[cite: 1]
+function setupFilterListeners() {
+  const actionFilter = document.getElementById('actionFilter');
+  const modeFilter = document.getElementById('modeFilter');
 
-    if (!history || history.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-slate-500">尚無歷史決策資料</td></tr>`;
-        return;
-    }
+  const applyFilters = () => {
+    const actionVal = actionFilter.value;
+    const modeVal = modeFilter.value;
 
-    let buyCount = 0, exitCount = 0;
+    const filtered = mockHistoryLogs.filter(log => {
+      const signal = evaluateTradingSignal(log);
+      const matchAction = actionVal === 'ALL' || signal.actionType === actionVal;
+      const matchMode = modeVal === 'ALL' || signal.mode === modeVal;
+      return matchAction && matchMode;
+    });
 
-    tbody.innerHTML = history.map(item => {
-        const dec = item.decision;
-        let badgeClass = "bg-slate-700 text-slate-300";
-        if (dec.color === "green") {
-            badgeClass = "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
-            buyCount++;
-        } else if (dec.color === "red") {
-            badgeClass = "bg-rose-500/20 text-rose-400 border border-rose-500/30";
-            exitCount++;
-        }
+    renderHistoryTable(filtered);
+  };
 
-        return `
-            <tr class="hover:bg-slate-700/40 border-b border-slate-700/40 transition">
-                <td class="p-3 font-mono text-slate-300">${item.date}</td>
-                <td class="p-3 font-mono font-bold text-slate-200">NT$ ${item.close.toFixed(2)}</td>
-                <td class="p-3 font-mono text-slate-400">${item.SDV.toFixed(1)}</td>
-                <td class="p-3 font-mono text-slate-400">${item.VDV.toFixed(1)}</td>
-                <td class="p-3 font-mono text-slate-400">${item.ADV.toFixed(1)} / ${item.BDV.toFixed(1)}</td>
-                <td class="p-3"><span class="px-2 py-1 rounded text-xs font-bold ${badgeClass}">${dec.name}</span></td>
-                <td class="p-3 text-xs text-slate-400">${item.riskAlert !== "常態監控中" ? `<span class="text-rose-400 font-bold">${item.riskAlert}</span>` : dec.desc}</td>
-            </tr>
-        `;
-    }).join("");
-
-    document.getElementById("historySummary").innerText = `近 6 個月 (120 交易日) 實時回測：觸發 ${buyCount} 次買進/加碼，${exitCount} 次平倉/風控。`;
+  actionFilter.addEventListener('change', applyFilters);
+  modeFilter.addEventListener('change', applyFilters);
 }
-
-function getLevelDesc(val) {
-    if (val >= 70) return "≥70 極致超買/暴甩頂點";
-    if (val >= 60) return "60~69 強勢延伸/放量擴張";
-    if (val >= 50) return "50~59 中性偏多/溫和控盤";
-    if (val >= 40) return "40~49 中性偏空/收斂整理";
-    if (val >= 30) return "30~39 空頭強勢/高度擠壓";
-    return "<30 極致超賣/Squeeze臨界";
-}
-
-// 頁面載入完成後自動分析預設股票 (2330)
-window.onload = () => analyzeStock();
