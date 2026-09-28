@@ -48,21 +48,26 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
     const cardSignal = document.getElementById("cardSignal");
     badge.innerText = `${decision.name} | ${decision.signal}`;
 
-    if (decision.color === "green") {
-        cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-emerald-500/80 flex flex-col justify-between shadow-lg shadow-emerald-500/10";
-        badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-center";
-    } else if (decision.color === "red") {
+    // 台股配色語意：多頭/買進用亮紅 (rose/red)，空頭/賣出用亮綠 (emerald/green)，中性用天空藍 (sky)
+    if (decision.color === "red") {
         cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-rose-500/80 flex flex-col justify-between shadow-lg shadow-rose-500/10";
         badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-rose-500/20 text-rose-400 border border-rose-500/30 text-center";
+    } else if (decision.color === "green") {
+        cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-emerald-500/80 flex flex-col justify-between shadow-lg shadow-emerald-500/10";
+        badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-center";
+    } else if (decision.color === "amber") {
+        cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-amber-500/80 flex flex-col justify-between shadow-lg shadow-amber-500/10";
+        badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-amber-500/20 text-amber-400 border border-amber-500/30 text-center";
     } else {
         cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-sky-500/80 flex flex-col justify-between shadow-lg shadow-sky-500/10";
         badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-sky-500/20 text-sky-400 border border-sky-500/30 text-center";
     }
 
-    updateCard("sdv", current.SDV, getLevelDesc(current.SDV));
-    updateCard("vdv", current.VDV, getLevelDesc(current.VDV));
-    updateCard("adv", current.ADV, getLevelDesc(current.ADV));
-    updateCard("bdv", current.BDV, getLevelDesc(current.BDV));
+    // 更新四大指標專屬位階文案
+    updateCard("sdv", current.SDV, getSDVLevelDesc(current.SDV));
+    updateCard("vdv", current.VDV, getVDVLevelDesc(current.VDV));
+    updateCard("adv", current.ADV, getADVLevelDesc(current.ADV));
+    updateCard("bdv", current.BDV, getBDVLevelDesc(current.BDV));
 
     document.getElementById("advStopLossMode").innerText = advRiskControl.stopLossMode;
     document.getElementById("advStopLossRule").innerText = advRiskControl.stopLossRule;
@@ -70,8 +75,8 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
     const tpAlertElem = document.getElementById("advTakeProfitAlert");
     tpAlertElem.innerText = advRiskControl.takeProfitAlert;
     tpAlertElem.className = advRiskControl.action === "EXIT_FULL" 
-        ? "text-sm font-bold text-rose-400 bg-rose-950/50 p-2 rounded border border-rose-500/50 animate-pulse"
-        : "text-sm font-semibold text-emerald-400";
+        ? "text-sm font-bold text-emerald-400 bg-emerald-950/50 p-2 rounded border border-emerald-500/50 animate-pulse"
+        : "text-sm font-semibold text-sky-400";
 
     document.getElementById("deltaMatrixBody").innerHTML = `
         ${renderRow("SDV (股價離差)", current.SDV, delta.SDV_1, delta.SDV_5, delta.SDV_10)}
@@ -119,11 +124,14 @@ function renderHistoryTable(history) {
     tbody.innerHTML = history.map(item => {
         const dec = item.decision;
         let badgeClass = "bg-slate-700 text-slate-300";
-        if (dec.color === "green") {
-            badgeClass = "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
-            buyCount++;
-        } else if (dec.color === "red") {
+        if (dec.color === "red") {
             badgeClass = "bg-rose-500/20 text-rose-400 border border-rose-500/30";
+            buyCount++;
+        } else if (dec.color === "green") {
+            badgeClass = "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+            exitCount++;
+        } else if (dec.color === "amber") {
+            badgeClass = "bg-amber-500/20 text-amber-400 border border-amber-500/30";
             exitCount++;
         }
 
@@ -135,7 +143,7 @@ function renderHistoryTable(history) {
                 <td class="p-3 font-mono text-slate-400">${item.VDV.toFixed(1)}</td>
                 <td class="p-3 font-mono text-slate-400">${item.ADV.toFixed(1)} / ${item.BDV.toFixed(1)}</td>
                 <td class="p-3"><span class="px-2 py-1 rounded text-xs font-bold ${badgeClass}">${dec.name}</span></td>
-                <td class="p-3 text-xs text-slate-400">${item.riskAlert !== "常態監控中" ? `<span class="text-rose-400 font-bold">${item.riskAlert}</span>` : dec.desc}</td>
+                <td class="p-3 text-xs text-slate-400">${item.riskAlert !== "常態監控中" ? `<span class="text-emerald-400 font-bold">${item.riskAlert}</span>` : dec.desc}</td>
             </tr>
         `;
     }).join("");
@@ -143,13 +151,41 @@ function renderHistoryTable(history) {
     document.getElementById("historySummary").innerText = `近 6 個月 (120 交易日) 實時回測：觸發 ${buyCount} 次買進/加碼，${exitCount} 次平倉/風控。`;
 }
 
-function getLevelDesc(val) {
-    if (val >= 70) return "≥70 極致超買/暴甩頂點";
-    if (val >= 60) return "60~69 強勢延伸/放量擴張";
+// 根據說明文案實作四大指標專屬位階定義
+function getSDVLevelDesc(val) {
+    if (val >= 70) return "≥70 極致超買/強勢主攻";
+    if (val >= 60) return "60~69 多頭強勢/趨勢延伸";
     if (val >= 50) return "50~59 中性偏多/溫和控盤";
-    if (val >= 40) return "40~49 中性偏空/收斂整理";
-    if (val >= 30) return "30~39 空頭強勢/高度擠壓";
-    return "<30 極致超賣/Squeeze臨界";
+    if (val >= 40) return "40~49 中性偏空/溫和控盤";
+    if (val >= 30) return "30~39 空頭強勢/趨勢下尋";
+    return "<30 極致超賣/恐慌主跌";
+}
+
+function getVDVLevelDesc(val) {
+    if (val >= 70) return "≥70 極致爆量/天量換手";
+    if (val >= 60) return "60~69 顯著放量/資金積極";
+    if (val >= 50) return "50~59 常態量能/資金中性";
+    if (val >= 40) return "40~49 量能微縮/資金觀望";
+    if (val >= 30) return "30~39 低迷量能/顯著縮量";
+    return "<30 極致窒息量/量能冰點";
+}
+
+function getADVLevelDesc(val) {
+    if (val >= 70) return "≥70 極致劇烈/高風險暴甩";
+    if (val >= 60) return "60~69 波動擴大/風險升溫";
+    if (val >= 50) return "50~59 中度波動/風險適性";
+    if (val >= 40) return "40~49 波動收斂/風險偏低";
+    if (val >= 30) return "30~39 低度波動/市場沉寂";
+    return "<30 極致平靜/波動死寂";
+}
+
+function getBDVLevelDesc(val) {
+    if (val >= 70) return "≥70 極致擴張/通道張裂頂點";
+    if (val >= 60) return "60~69 通道擴張/主升(跌)段";
+    if (val >= 50) return "50~59 中軸運作/態勢緩和";
+    if (val >= 40) return "40~49 通道收縮/區間盤整";
+    if (val >= 30) return "30~39 高度擠壓/變盤蓄勢";
+    return "<30 極致收縮/Squeeze臨界";
 }
 
 // 頁面載入完成後自動分析預設股票 (2330)
