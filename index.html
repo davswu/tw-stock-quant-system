@@ -1,111 +1,174 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>四指標量化系統決策儀表板</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>台股實時四指標與歷史系統決策矩陣</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-100 text-slate-800 font-sans antialiased p-4 md:p-8">
+<body class="bg-slate-900 text-slate-100 min-h-screen p-4 md:p-8">
 
-  <div class="max-w-7xl mx-auto space-y-6">
-    
-    <!-- 頁頭 -->
-    <header class="flex justify-between items-center border-b pb-4">
-      <div>
-        <h1 class="text-xl md:text-2xl font-bold text-slate-900">當前系統決策訊號面板[cite: 1]</h1>
-        <p class="text-xs text-slate-500">基於 SDV / VDV / ADV / BDV 四指標共振邏輯[cite: 1]</p>
-      </div>
-    </header>
-
-    <!-- 頂層決策 Banner[cite: 1] -->
-    <div id="decisionBanner"></div>
-
-    <!-- 當前訊號核心區塊：卡片 + Gauge[cite: 1] -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-      <!-- 第一層環境卡片[cite: 1] -->
-      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">第一層：環境狀態 (ADV+BDV)[cite: 1]</span>
-        <div id="layer1Text" class="text-base font-semibold text-slate-700 mt-2">--</div>
-      </div>
-      <!-- 第二層資金方向卡片[cite: 1] -->
-      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">第二層：資金方向 (SDV+VDV)[cite: 1]</span>
-        <div id="layer2Text" class="text-base font-semibold text-slate-700 mt-2">--</div>
-      </div>
-      <!-- 歷史評估指標區[cite: 1] -->
-      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 col-span-1 md:col-span-2">
-        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">多週期動能 Quick Matrix (Δ1/Δ5/Δ10)[cite: 1]</span>
-        <div class="grid grid-cols-3 gap-2 text-center text-xs">
-          <div class="p-2 bg-slate-50 rounded">ΔSDV₁: <span class="font-bold text-emerald-600">+4</span></div>
-          <div class="p-2 bg-slate-50 rounded">ΔSDV₅: <span class="font-bold text-emerald-600">+8</span></div>
-          <div class="p-2 bg-slate-50 rounded">ΔSDV₁₀: <span class="font-bold text-emerald-600">+14</span></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 四指標即時數值與位階指示條 (Gauge)[cite: 1] -->
-    <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
-      <h3 class="text-sm font-bold text-slate-800 border-b pb-2">當日實體指標位階快照[cite: 1]</h3>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div id="sdvGauge"></div>
-        <div id="vdvGauge"></div>
-        <div id="advGauge"></div>
-        <div id="bdvGauge"></div>
-      </div>
-    </div>
-
-    <!-- 歷史系統決策訊號紀錄區塊[cite: 1] -->
-    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
-      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-4">
-        <h3 class="text-lg font-bold text-slate-900">歷史系統決策訊號紀錄[cite: 1]</h3>
+    <div class="max-w-7xl mx-auto space-y-6">
         
-        <!-- 多維度篩選器[cite: 1] -->
-        <div class="flex flex-wrap gap-2">
-          <select id="actionFilter" class="bg-slate-50 border border-slate-300 text-xs rounded-lg p-2.5">
-            <option value="ALL">所有動作分類[cite: 1]</option>
-            <option value="BUY">買進 (首筆/掃蕩)[cite: 1]</option>
-            <option value="ADD">加碼[cite: 1]</option>
-            <option value="BOTTOM">抄底[cite: 1]</option>
-            <option value="REDUCE">減碼[cite: 1]</option>
-            <option value="EXIT_PROFIT">平倉[cite: 1]</option>
-            <option value="STOP_LOSS">停損[cite: 1]</option>
-          </select>
-          
-          <select id="modeFilter" class="bg-slate-50 border border-slate-300 text-xs rounded-lg p-2.5">
-            <option value="ALL">所有觸發模式 (8大模式)[cite: 1]</option>
-            <option value="蓄勢突破">蓄勢突破[cite: 1]</option>
-            <option value="順勢拉回">順勢拉回[cite: 1]</option>
-            <option value="假跌破掃蕩">假跌破掃蕩[cite: 1]</option>
-            <option value="極致超跌">極致超跌[cite: 1]</option>
-            <option value="過熱高潮">過熱高潮[cite: 1]</option>
-            <option value="動能背離">動能背離[cite: 1]</option>
-            <option value="假突破避險">假突破避險[cite: 1]</option>
-            <option value="破位停損">破位停損[cite: 1]</option>
-          </select>
-        </div>
-      </div>
+        <!-- Header & 搜尋欄 -->
+        <header class="flex flex-col md:flex-row justify-between items-center bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg gap-4">
+            <div>
+                <h1 class="text-2xl font-bold text-sky-400">台股實時四指標與系統決策矩陣</h1>
+                <p class="text-sm text-slate-400 mt-1">對數標準化 (T-Score) + 多週期動能 (Δ₁ / Δ₅ / Δ₁₀) + ADV 動態移動風控 + 6個月歷史訊號追蹤</p>
+            </div>
+            
+            <div class="flex items-center space-x-2 w-full md:w-auto">
+                <input type="text" id="stockInput" value="2330" placeholder="輸入台股代碼 (如 8150)" 
+                       class="bg-slate-900 border border-slate-600 px-4 py-2 rounded-lg text-white font-mono focus:outline-none focus:border-sky-500 w-full md:w-48">
+                <button onclick="analyzeStock()" 
+                        class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded-lg font-bold transition text-white whitespace-nowrap">
+                    實時分析
+                </button>
+            </div>
+        </header>
 
-      <!-- 紀錄表格[cite: 1] -->
-      <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse">
-          <thead>
-            <tr class="bg-slate-50 border-b text-xs text-slate-500 uppercase">
-              <th class="p-3">日期 / 標的[cite: 1]</th>
-              <th class="p-3">決策動作[cite: 1]</th>
-              <th class="p-3">觸發模式[cite: 1]</th>
-              <th class="p-3">位階快照[cite: 1]</th>
-              <th class="p-3">動能快照[cite: 1]</th>
-              <th class="p-3 text-right">詳細資訊[cite: 1]</th>
-            </tr>
-          </thead>
-          <tbody id="historyTableBody"></tbody>
-        </table>
-      </div>
+        <!-- 4-Card 佈局區 -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
+                <div>
+                    <div id="stockTitle" class="flex flex-col">
+                        <span class="text-2xl font-extrabold text-white">--</span>
+                        <span class="text-sm text-slate-300 font-normal mt-1">--</span>
+                    </div>
+                </div>
+                <p id="decisionDesc" class="text-sm text-slate-400 mt-3 leading-relaxed">連線 GAS API 中...</p>
+            </div>
+
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
+                <div id="priceLabel" class="text-sm font-bold text-slate-400 mb-1">即時股價 (T / T-1)</div>
+                <div id="stockPrice" class="text-2xl md:text-3xl font-extrabold font-mono text-emerald-400">NT$ --</div>
+            </div>
+
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
+                <div id="volumeLabel" class="text-sm font-bold text-slate-400 mb-1">即時成交量 (T / T-1)</div>
+                <div id="stockVolume" class="text-2xl md:text-3xl font-extrabold font-mono text-sky-400">-- 張</div>
+            </div>
+
+            <div id="cardSignal" class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
+                <div class="text-sm font-bold text-slate-400 mb-1">當前系統決策訊號</div>
+                <div id="signalBadge" class="inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-slate-700 text-slate-300 text-center">
+                    等待分析
+                </div>
+            </div>
+        </div>
+
+        <!-- 四指標 T-Score 現況 -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700">
+                <div class="text-sm font-bold text-slate-400 mb-1">價格位階 (SDV)</div>
+                <div id="sdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
+                <div id="sdvStatus" class="text-xs mt-2 text-slate-400">--</div>
+            </div>
+            
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700">
+                <div class="text-sm font-bold text-slate-400 mb-1">資金強度 (VDV)</div>
+                <div id="vdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
+                <div id="vdvStatus" class="text-xs mt-2 text-slate-400">--</div>
+            </div>
+
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700">
+                <div class="text-sm font-bold text-slate-400 mb-1">風險環境 (ADV)</div>
+                <div id="advValue" class="text-4xl font-extrabold font-mono text-white">--</div>
+                <div id="advStatus" class="text-xs mt-2 text-slate-400">--</div>
+            </div>
+
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700">
+                <div class="text-sm font-bold text-slate-400 mb-1">週期張力 (BDV)</div>
+                <div id="bdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
+                <div id="bdvStatus" class="text-xs mt-2 text-slate-400">--</div>
+            </div>
+        </div>
+
+        <!-- ADV 波動度驅動之動態移動風控樞紐區塊 -->
+        <div class="bg-slate-800/90 p-6 rounded-xl border border-sky-500/30 shadow-xl space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-700 pb-3">
+                <h3 class="text-lg font-bold text-sky-400 flex items-center gap-2">
+                    🛡️ ADV 波動度驅動之動態移動風控樞紐 (Trailing Risk Control)
+                </h3>
+                <span class="text-xs px-2.5 py-1 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/20">適應型移動風控</span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-700/80">
+                    <div class="text-xs text-slate-400 mb-1">當前 ADV 停損模式 (Dynamic Stop-Loss)</div>
+                    <div id="advStopLossMode" class="text-sm font-bold text-amber-400">--</div>
+                    <div id="advStopLossRule" class="text-xs text-slate-300 mt-2 leading-relaxed">--</div>
+                </div>
+
+                <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-700/80">
+                    <div class="text-xs text-slate-400 mb-1">極致爆發移動停利監控 (Trailing Take-Profit)</div>
+                    <div id="advTakeProfitAlert" class="text-sm font-semibold text-emerald-400">常態監控中</div>
+                    <div class="text-xs text-slate-400 mt-2">觸發條件：SDV ≥ 65 & ADV ≥ 70 且 Δ₁ADV ≤ -3.0 (情緒爆發拐點出場)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Δ 動能矩陣區塊 -->
+        <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
+            <h3 class="text-lg font-bold text-slate-200 mb-4">
+                多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)
+            </h3>
+            
+            <div class="overflow-x-auto">
+                <table class="w-full text-center text-sm border-collapse">
+                    <thead>
+                        <tr class="bg-slate-900/80 text-slate-400 border-b border-slate-700">
+                            <th class="p-3 text-left">指標類型</th>
+                            <th class="p-3">當前 T-Score</th>
+                            <th class="p-3">Δ₁ (單日動能)</th>
+                            <th class="p-3">Δ₅ (短線動能)</th>
+                            <th class="p-3">Δ₁₀ (中線結構)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="deltaMatrixBody" class="divide-y divide-slate-700/50 font-mono">
+                        <tr><td colspan="5" class="p-4 text-slate-500">尚無資料</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 歷史系統決策訊號紀錄區塊 -->
+        <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg space-y-4">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-700 pb-3 gap-2">
+                <div>
+                    <h3 class="text-lg font-bold text-amber-400 flex items-center gap-2">
+                        📜 歷史系統決策訊號紀錄 (近 6 個月 / 120 交易日)
+                    </h3>
+                    <p id="historySummary" class="text-xs text-slate-400 mt-1">等待數據加載中...</p>
+                </div>
+                <span class="text-xs px-2.5 py-1 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">系統歷史檢驗</span>
+            </div>
+
+            <div class="overflow-x-auto max-h-96 overflow-y-auto">
+                <table class="w-full text-center text-sm border-collapse">
+                    <thead class="sticky top-0 bg-slate-900 text-slate-400 border-b border-slate-700">
+                        <tr>
+                            <th class="p-3 text-left">交易日期</th>
+                            <th class="p-3">收盤價</th>
+                            <th class="p-3">SDV</th>
+                            <th class="p-3">VDV</th>
+                            <th class="p-3">ADV / BDV</th>
+                            <th class="p-3">觸發決策名稱</th>
+                            <th class="p-3 text-left">風控與診斷說明</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyTableBody" class="divide-y divide-slate-700/50">
+                        <tr><td colspan="7" class="p-4 text-slate-500">點擊「實時分析」進行動態計算...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
     </div>
 
-  </div>
-
-  <script type="module" src="./main.js"></script>
+    <!-- 依序載入運算引擎與主程式 -->
+    <script src="quantEngine.js"></script>
+    <script src="main.js"></script>
 </body>
 </html>
