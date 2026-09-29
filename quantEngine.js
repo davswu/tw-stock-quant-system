@@ -1,105 +1,275 @@
 /**
- * quantEngine.js - 核心量化運算引擎 (對接真實數據)
+ * QuantDecisionEngine - 對數標準化 (T-Score) 與共振決策矩陣運算引擎
  */
-
-function calculateLogTScore(series) {
-  const windowSize = 30;
-  return series.map((val, idx, arr) => {
-    if (idx < windowSize - 1) return 50.0;
-    const slice = arr.slice(idx - windowSize + 1, idx + 1);
-    const logVals = slice.map(v => Math.log(Math.max(v, 0.0001)));
-    const mean = logVals.reduce((a, b) => a + b, 0) / windowSize;
-    const variance = logVals.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / windowSize;
-    const std = Math.sqrt(variance) || 0.0001;
-    const zScore = (Math.log(Math.max(val, 0.0001)) - mean) / std;
-    return parseFloat(Math.min(Math.max(50 + zScore * 10, 0), 100).toFixed(1));
-  });
-}
-
-function calculateDeltas(tScores) {
-  return tScores.map((val, i) => ({
-    d1: i >= 1 ? parseFloat((val - tScores[i - 1]).toFixed(1)) : 0,
-    d5: i >= 5 ? parseFloat((val - tScores[i - 5]).toFixed(1)) : 0,
-    d10: i >= 10 ? parseFloat((val - tScores[i - 10]).toFixed(1)) : 0
-  }));
-}
-
-function processQuantEngine(rawOHLCV) {
-  const closes = rawOHLCV.map(d => Number(d.close));
-  const volumes = rawOHLCV.map(d => Number(d.volume) / 1000); // 原始股數除以1000轉為「張」
-
-  const tr = rawOHLCV.map((d, i) => {
-    if (i === 0) return Number(d.high) - Number(d.low);
-    const prevClose = Number(rawOHLCV[i - 1].close);
-    return Math.max(Number(d.high) - Number(d.low), Math.abs(Number(d.high) - prevClose), Math.abs(Number(d.low) - prevClose));
-  });
-  
-  const atr14 = tr.map((_, i, arr) => {
-    if (i < 13) return tr[i];
-    const slice = arr.slice(i - 13, i + 1);
-    return slice.reduce((a, b) => a + b, 0) / 14;
-  });
-
-  const bandwidth = closes.map((p, i) => {
-    if (i < 19) return 0.05;
-    const slice = closes.slice(i - 19, i + 1);
-    const ma = slice.reduce((a, b) => a + b, 0) / 20;
-    const std = Math.sqrt(slice.reduce((a, b) => a + Math.pow(b - ma, 2), 0) / 20);
-    return (std * 4) / ma;
-  });
-
-  const SDV = calculateLogTScore(closes);
-  const VDV = calculateLogTScore(volumes);
-  const ADV = calculateLogTScore(atr14);
-  const BDV = calculateLogTScore(bandwidth);
-
-  const SDV_Deltas = calculateDeltas(SDV);
-  const VDV_Deltas = calculateDeltas(VDV);
-
-  const historySignals = [];
-  const startIndex = Math.max(0, rawOHLCV.length - 120);
-
-  for (let i = startIndex; i < rawOHLCV.length; i++) {
-    const s = SDV[i], v = VDV[i], a = ADV[i], b = BDV[i];
-    const d5 = SDV_Deltas[i].d5;
-    let signal = { type: '觀望', color: 'blue', text: '藍中性觀望' };
-
-    if (s > 65 && v > 65 && d5 > 0) {
-      signal = { type: '買進', color: 'red', text: '【紅買】強勢量價突破買進' };
-    } else if (s > 60 && v > 55 && d5 > 3) {
-      signal = { type: '加碼', color: 'red', text: '【紅買】多頭續強加碼' };
-    } else if (a > 70 && b > 70) {
-      signal = { type: '掃蕩', color: 'red', text: '【紅買】張力擴張攻擊掃蕩' };
-    } else if (b < 35 && s < 40 && d5 > 0) {
-      signal = { type: '抄底', color: 'red', text: '【紅買】壓縮轉折抄底' };
-    } else if (s > 75 && v < 45) {
-      signal = { type: '獲利平倉', color: 'green', text: '【綠賣】高位量價背離平倉' };
-    } else if (s < 40 && d5 < -5) {
-      signal = { type: '停損', color: 'green', text: '【綠賣】動能崩解嚴格停損' };
-    } else if (a > 70 && d5 < 0) {
-      signal = { type: '避險', color: 'amber', text: '【琥珀黃】極端波動避險減碼' };
-    } else if (d5 < -2) {
-      signal = { type: '減碼', color: 'amber', text: '【琥珀黃】動能趨緩高格減碼' };
+class QuantDecisionEngine {
+    constructor(rawData) {
+        this.rawData = rawData || [];
+        this.tScores = [];
     }
 
-    if (signal.color !== 'blue') {
-      historySignals.push({
-        date: rawOHLCV[i].date,
-        price: Number(rawOHLCV[i].close),
-        signal: signal
-      });
-    }
-  }
+    calculateDerivedMetrics() {
+        const len = this.rawData.length;
+        let trs = [];
+        
+        for (let i = 0; i < len; i++) {
+            if (i === 0) {
+                trs.push(this.rawData[i].high - this.rawData[i].low);
+            } else {
+                const h = this.rawData[i].high;
+                const l = this.rawData[i].low;
+                const prevC = this.rawData[i - 1].close;
+                trs.push(Math.max(h - l, Math.abs(h - prevC), Math.abs(l - prevC)));
+            }
+        }
 
-  const last = rawOHLCV.length - 1;
-  return {
-    latest: {
-      price: closes[last],
-      change: (closes[last] - closes[last - 1]).toFixed(2),
-      SDV: SDV[last], VDV: VDV[last], ADV: ADV[last], BDV: BDV[last],
-      SDV_D: SDV_Deltas[last], VDV_D: VDV_Deltas[last],
-      atr: atr14[last].toFixed(2)
-    },
-    historySignals: historySignals
-  };
+        let atrs = [];
+        for (let i = 0; i < len; i++) {
+            if (i < 13) {
+                atrs.push(null);
+            } else {
+                const sum = trs.slice(i - 13, i + 1).reduce((a, b) => a + b, 0);
+                atrs.push(sum / 14);
+            }
+        }
+
+        let bws = [];
+        for (let i = 0; i < len; i++) {
+            if (i < 19) {
+                bws.push(null);
+            } else {
+                const sliceC = this.rawData.slice(i - 19, i + 1).map(d => d.close);
+                const mean = sliceC.reduce((a, b) => a + b, 0) / 20;
+                const variance = sliceC.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / 20;
+                const std = Math.sqrt(variance);
+                bws.push(mean === 0 ? 0 : (4 * std) / mean);
+            }
+        }
+
+        for (let i = 0; i < len; i++) {
+            this.rawData[i].atr = atrs[i];
+            this.rawData[i].bandwidth = bws[i];
+        }
+    }
+
+    calculateTScores(windowSize = 30) {
+        this.calculateDerivedMetrics();
+        const len = this.rawData.length;
+        let tScoresHistory = [];
+
+        for (let i = 0; i < len; i++) {
+            if (i < windowSize + 18) {
+                tScoresHistory.push(null);
+                continue;
+            }
+
+            const window = this.rawData.slice(i - windowSize + 1, i + 1);
+            const lnP = window.map(d => Math.log(Math.max(d.close, 0.0001)));
+            const lnV = window.map(d => Math.log(Math.max(d.volume, 1)));
+            const lnA = window.map(d => Math.log(Math.max(d.atr, 0.0001)));
+            const lnB = window.map(d => Math.log(Math.max(d.bandwidth, 0.0001)));
+
+            const calcTS = (val, lnArray) => {
+                const lnVal = Math.log(Math.max(val, 0.0001));
+                const mu = lnArray.reduce((a, b) => a + b, 0) / lnArray.length;
+                const variance = lnArray.reduce((a, b) => a + Math.pow(b - mu, 2), 0) / lnArray.length;
+                const sigma = Math.sqrt(variance);
+                if (sigma === 0) return 50;
+                return Math.min(100, Math.max(0, 10 * ((lnVal - mu) / sigma) + 50));
+            };
+
+            const curr = this.rawData[i];
+            tScoresHistory.push({
+                date: curr.date,
+                close: curr.close,
+                volume: curr.volume,
+                SDV: calcTS(curr.close, lnP),
+                VDV: calcTS(curr.volume, lnV),
+                ADV: calcTS(curr.atr, lnA),
+                BDV: calcTS(curr.bandwidth, lnB)
+            });
+        }
+
+        this.tScores = tScoresHistory.filter(d => d !== null);
+        return this.tScores;
+    }
+
+    getLatestAnalysis() {
+        if (this.tScores.length === 0) this.calculateTScores();
+        const ts = this.tScores;
+        const len = ts.length;
+        if (len < 11) return null;
+
+        const t = ts[len - 1];
+        const delta = this.computeDelta(t, ts[len - 2], ts[len - 6], ts[len - 11]);
+        return {
+            current: t,
+            delta: delta,
+            decision: this.matchDecisionMatrix(t, delta, ts, len - 1),
+            advRiskControl: this.evaluateADVRiskControl(t, delta)
+        };
+    }
+
+    /**
+     * 歷史決策軌跡與交易對配對（支援近 120 交易日 6 欄位表格呈現）
+     */
+    getHistoricalDecisionSignals(tradingDays = 120) {
+        if (this.tScores.length === 0) this.calculateTScores();
+        const ts = this.tScores;
+        const len = ts.length;
+        if (len < 11) return [];
+
+        const startIndex = Math.max(10, len - tradingDays);
+        let activePosition = null; // 當前配對持倉
+        let pairedTrades = [];
+
+        for (let i = startIndex; i < len; i++) {
+            const t = ts[i];
+            const delta = this.computeDelta(t, ts[i - 1], ts[i - 5], ts[i - 10]);
+            const decision = this.matchDecisionMatrix(t, delta, ts, i);
+            const advRisk = this.evaluateADVRiskControl(t, delta);
+
+            // 判讀買入觸發 (RED)
+            if (decision.color === "red") {
+                if (!activePosition) {
+                    activePosition = {
+                        buyDate: t.date,
+                        buyPrice: t.close,
+                        buySignal: decision.name,
+                        sellDate: "--",
+                        sellPrice: null,
+                        sellSignal: "持倉監控中"
+                    };
+                }
+            } 
+            // 判讀賣出/風控觸發 (GREEN / AMBER)
+            else if ((decision.color === "green" || decision.color === "amber" || advRisk.action === "EXIT_FULL") && activePosition) {
+                activePosition.sellDate = t.date;
+                activePosition.sellPrice = t.close;
+                activePosition.sellSignal = advRisk.action === "EXIT_FULL" ? advRisk.takeProfitAlert : decision.name;
+                
+                pairedTrades.push(activePosition);
+                activePosition = null; // 清空持倉準備下一波段
+            }
+        }
+
+        // 若最後一波段尚未平倉，將目前持倉狀態放入列表頂端
+        if (activePosition) {
+            pairedTrades.push(activePosition);
+        }
+
+        return pairedTrades.reverse(); // 最新交易排在最上方
+    }
+
+    computeDelta(t, t_1, t_5, t_10) {
+        return {
+            SDV_1: t.SDV - t_1.SDV, SDV_5: t.SDV - t_5.SDV, SDV_10: t.SDV - t_10.SDV,
+            VDV_1: t.VDV - t_1.VDV, VDV_5: t.VDV - t_5.VDV, VDV_10: t.VDV - t_10.VDV,
+            ADV_1: t.ADV - t_1.ADV, ADV_5: t.ADV - t_5.ADV, ADV_10: t.ADV - t_10.ADV,
+            BDV_1: t.BDV - t_1.BDV, BDV_5: t.BDV - t_5.BDV, BDV_10: t.BDV - t_10.BDV
+        };
+    }
+
+    evaluateADVRiskControl(t, delta) {
+        let stopLossMode = "", stopLossRule = "", takeProfitAlert = "常態監控中", action = "HOLD";
+
+        if (t.ADV < 40) {
+            stopLossMode = "低波動蓄勢期（窄停損）";
+            stopLossRule = "進場價 -2.0% 或跌破關鍵位 (SDV < 45)";
+        } else if (t.ADV <= 60) {
+            stopLossMode = "常態順勢期（標準停損）";
+            stopLossRule = "進場價 -5.0% 或 -2.0 × ATR 防線";
+        } else {
+            stopLossMode = "高波動爆發期（移動緊縮停損）";
+            stopLossRule = "自波段最高價回檔 -3.0% (Trailing Stop)";
+        }
+
+        if (t.SDV >= 65 && t.ADV >= 70 && delta.ADV_1 <= -3.0) {
+            takeProfitAlert = "觸發【過熱噴發拐點停利 (Blow-off Top)】";
+            action = "EXIT_FULL";
+        } else if (t.SDV >= 70 && t.BDV >= 70 && delta.SDV_1 <= -3.0) {
+            takeProfitAlert = "觸發【雙重離差過熱防線 (SDV + BDV 共振)】";
+            action = "EXIT_FULL";
+        }
+
+        return { stopLossMode, stopLossRule, takeProfitAlert, action };
+    }
+
+    matchDecisionMatrix(t, d, tsHistory, currentIndex) {
+        const { SDV, VDV, ADV, BDV } = t;
+        const prevT1 = currentIndex > 0 ? tsHistory[currentIndex - 1] : null;
+
+        // 1. 蓄勢突破 (買進首筆)
+        if (ADV >= 40 && ADV <= 50 && BDV < 40 && SDV >= 50 && SDV <= 60 && VDV >= 60 &&
+            d.SDV_10 >= 3 && d.VDV_10 > 0 && d.ADV_10 <= 0 && d.BDV_10 <= -3 &&
+            d.SDV_5 >= 3 && d.VDV_5 >= 3 && d.ADV_5 >= -3 && d.ADV_5 <= 3 && d.BDV_5 <= -3 &&
+            d.SDV_1 >= 3 && d.VDV_1 >= 3 && d.ADV_1 > 0 && d.BDV_1 >= 3) {
+            return { action: "BUY_FIRST", name: "蓄勢突破", signal: "買進 (首筆)", color: "red", desc: "變盤蓄勢完成，主力放量衝過中軸，啟動強烈突破。" };
+        }
+
+        // 2. 順勢拉回 (加碼二次)
+        if (ADV >= 40 && ADV <= 50 && BDV >= 50 && BDV <= 60 && SDV >= 50 && SDV <= 59 && VDV < 40 &&
+            d.SDV_10 >= 3 && d.VDV_10 >= 3 && d.ADV_10 >= -3 && d.ADV_10 <= 3 && d.BDV_10 >= 3 &&
+            d.SDV_5 >= -3 && d.SDV_5 <= 0 && d.VDV_5 <= -3 && d.ADV_5 <= 0 && d.BDV_5 >= -3 && d.BDV_5 <= 3 &&
+            d.SDV_1 >= 3 && d.VDV_1 > 0 && d.ADV_1 >= -3 && d.ADV_1 <= 3 && d.BDV_1 >= 0) {
+            return { action: "BUY_ADD", name: "順勢拉回", signal: "加碼 (二次)", color: "red", desc: "主升段拉回無量洗盤結束，出現止跌陽線重啟攻勢。" };
+        }
+
+        // 3. 假跌破掃蕩 (買進)
+        const brokeUnder50AndRecovered = prevT1 && prevT1.SDV < 50 && SDV >= 50;
+        if (ADV >= 50 && ADV <= 60 && BDV < 50 && brokeUnder50AndRecovered && (VDV < 40 || VDV >= 60) &&
+            d.SDV_10 >= 0 && d.VDV_10 >= 0 && d.BDV_10 <= 0 &&
+            d.SDV_5 <= -3 && d.VDV_5 <= -3 && d.ADV_5 >= 3 && d.BDV_5 <= 0 &&
+            d.SDV_1 >= 10 && d.VDV_1 >= 3 && d.ADV_1 > 0 && d.BDV_1 >= 3) {
+            return { action: "BUY_BEAR_TRAP", name: "假跌破掃蕩", signal: "買進 (掃蕩)", color: "red", desc: "誘空洗盤結束，爆發長陽吞噬並強勢收復多空中軸。" };
+        }
+
+        // 4. 極致超跌 (抄底)
+        if (ADV >= 70 && BDV >= 70 && SDV < 30 && VDV >= 70 &&
+            d.SDV_10 <= -10 && d.VDV_10 >= 10 && d.ADV_10 >= 10 && d.BDV_10 >= 10 &&
+            d.SDV_5 <= -10 && d.VDV_5 >= 3 && d.ADV_5 >= 3 && d.BDV_5 >= 3 &&
+            d.SDV_1 >= 3 && d.ADV_1 <= -3 && d.BDV_1 <= -3) {
+            return { action: "BUY_BOTTOM", name: "極致超跌", signal: "抄底買進", color: "red", desc: "恐慌盤極致釋放與天量換手，出現長下影止跌訊號。" };
+        }
+
+        // 5. 過熱高潮 (大獲利平倉)
+        if (ADV >= 70 && BDV >= 70 && SDV >= 70 && (VDV >= 70 || VDV < 40) &&
+            d.SDV_10 >= 10 && d.VDV_10 >= 10 && d.ADV_10 >= 10 && d.BDV_10 >= 10 &&
+            d.SDV_5 < 3 && d.VDV_5 <= -3 && d.ADV_5 >= 3 &&
+            d.SDV_1 <= -3 && d.VDV_1 <= -3 && d.ADV_1 >= 3 && d.BDV_1 <= -3) {
+            return { action: "EXIT_FULL_PROFIT", name: "過熱高潮", signal: "大獲利平倉", color: "green", desc: "情緒高潮與帶寬頂點，動能急遽放緩，拐點反轉離場。" };
+        }
+
+        // 6. 動能背離 (減碼平倉 50%)
+        if (ADV >= 50 && ADV <= 60 && BDV >= 60 && BDV <= 70 && SDV >= 60 && VDV < 40 &&
+            d.SDV_10 >= 3 && d.VDV_10 <= -3 && d.BDV_10 >= 3 &&
+            d.SDV_5 < 0 && d.VDV_5 <= -3 && d.ADV_5 <= 0 && d.BDV_5 <= 0 &&
+            d.SDV_1 <= -3 && d.VDV_1 <= -3 && d.ADV_1 <= 0 && d.BDV_1 <= 0) {
+            return { action: "EXIT_HALF_DIVERGENCE", name: "動能背離", signal: "減碼平倉 50%", color: "amber", desc: "股價創新高但量能顯著背離，中線資金失血，防禦性減碼。" };
+        }
+
+        // 7. 假突破避險 (即時賣出離場)
+        const spikedAbove60AndFell = prevT1 && prevT1.SDV > 60 && SDV < 50;
+        if (ADV >= 60 && spikedAbove60AndFell && (VDV < 40 || VDV >= 60) &&
+            d.SDV_10 <= 0 && d.VDV_10 <= 0 && d.ADV_10 >= 3 && d.BDV_10 >= 3 &&
+            d.SDV_5 <= -3 && d.VDV_5 <= -3 && d.ADV_5 >= 3 && d.BDV_5 <= 0 &&
+            d.SDV_1 <= -10 && d.VDV_1 >= 3 && d.ADV_1 >= 3 && d.BDV_1 <= -3) {
+            return { action: "EXIT_FAKE_BREAKOUT", name: "假突破避險", signal: "即時賣出離場", color: "green", desc: "高位衝高誘多後長陰反殺，帶量破位，即時避險離場。" };
+        }
+
+        // 8. 破位停損 (完全停損離場)
+        if (ADV >= 60 && BDV >= 50 && SDV < 50 && VDV >= 60 &&
+            d.SDV_10 <= -10 && d.VDV_10 >= 3 && d.ADV_10 >= 3 && d.BDV_10 >= 3 &&
+            d.SDV_5 <= -3 && d.VDV_5 >= 3 && d.ADV_5 >= 3 && d.BDV_5 >= 3 &&
+            d.SDV_1 <= -3 && d.VDV_1 >= 3 && d.ADV_1 >= 3 && d.BDV_1 >= 3) {
+            return { action: "STOP_LOSS", name: "破位停損", signal: "完全停損離場", color: "green", desc: "跌破多空中軸，伴隨恐慌殺多賣壓，趨勢轉空停損。" };
+        }
+
+        return {
+            action: "NEUTRAL",
+            name: SDV >= 50 ? "多頭控盤/常態運作" : "空頭控盤/盤整觀望",
+            signal: SDV >= 50 ? "續抱 / 觀望" : "觀望 / 空手",
+            color: "blue",
+            desc: "市場指標處於標準常態區間，無特殊極端共振觸發訊號。"
+        };
+    }
 }
