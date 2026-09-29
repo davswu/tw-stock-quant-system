@@ -1,96 +1,58 @@
-class QuantEngine {
-    constructor(prices, volumes) {
-        this.prices = prices; // 歷史收盤價陣列
-        this.volumes = volumes.map(v => v / 1000.0); // 成交量統一轉換為「張」
-        this.windowSize = 30; // 30 日滑動視窗
+/**
+ * quantEngine.js
+ * 台股對數 T-Score 與 4-Layer 診斷矩陣核心運算引擎
+ */
+
+const quantEngine = {
+  /**
+   * 對數化處理與 T-Score 轉換 (Mean=50, SD=10)
+   * @param {Array<number>} arr - 歷史數據陣列 (通常為 30 交易日)
+   * @param {number} currentValue - 當前即時數據
+   * @returns {number} T-Score 數值 (保留一位小數)
+   */
+  calculateLogTScore(arr, currentValue) {
+    if (!arr || arr.length === 0) return 50.0;
+    
+    // 取對數防止極端值偏差
+    const logArr = arr.map(v => Math.log(Math.max(v, 0.00001)));
+    const currentLog = Math.log(Math.max(currentValue, 0.00001));
+    
+    const mean = logArr.reduce((a, b) => a + b, 0) / logArr.length;
+    const variance = logArr.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / logArr.length;
+    const stdDev = Math.sqrt(variance) || 1;
+    
+    const zScore = (currentLog - mean) / stdDev;
+    const tScore = 50 + (zScore * 10);
+    return parseFloat(tScore.toFixed(1));
+  },
+
+  /**
+   * 4-Layer 診斷矩陣 logic
+   */
+  diagnoseLayer(sdv, vdv, adv, bdv, d5Sdv, d10Sdv) {
+    let l1 = "盤整狀態", l2 = "張力收斂", l3 = "動能中立", l4 = "【觀望】";
+    
+    // Layer 1: 量價共振
+    if (sdv > 60 && vdv > 60) l1 = "多頭主升段強烈攻擊";
+    else if (sdv < 40 && vdv > 60) l1 = "空頭恐慌殺盤";
+
+    // Layer 2: 張力壓縮
+    if (bdv > 60) l2 = "張力擴張 / 突破臨界";
+    else if (bdv < 40) l2 = "高張力壓縮 (Squeeze)";
+
+    // Layer 3: 多週期動能
+    if (d5Sdv > 0 && d10Sdv > 0) l3 = "長短週期動能同向升溫";
+    else if (d5Sdv < 0 && d10Sdv > 0) l3 = "高位動能背離";
+
+    // Layer 4: 系統綜合決策
+    if (sdv > 60 && vdv > 60 && d5Sdv > 0) {
+      l4 = "【強烈買進 / 右側加碼】";
+    } else if (sdv >= 70) {
+      l4 = "【極致超買 / 警示分批停利】";
+    } else if (sdv <= 30 && bdv > 60) {
+      l4 = "【左側超跌 / 底部抄底點】";
     }
 
-    // 對數 T-Score 計算
-    calculateTScore(array, windowIndex) {
-        if (windowIndex < this.windowSize) return 50;
-
-        const slice = array.slice(windowIndex - this.windowSize, windowIndex + 1);
-        const logValues = slice.map(v => Math.log(v > 0 ? v : 1));
-        
-        const mean = logValues.reduce((a, b) => a + b, 0) / logValues.length;
-        const stdDev = Math.sqrt(logValues.reduce((sq, n) => sq + Math.pow(n - mean, 2), 0) / logValues.length);
-
-        if (stdDev === 0) return 50;
-
-        const currentLog = logValues[logValues.length - 1];
-        const zScore = (currentLog - mean) / stdDev;
-        
-        // 映射至 T-Score (Mean=50, Std=10)
-        return Math.min(Math.max(50 + zScore * 10, 0), 100);
-    }
-
-    // 取得單日完整診斷
-    getAnalysisAtIndex(i) {
-        const sdv = this.calculateTScore(this.prices, i);
-        const vdv = this.calculateTScore(this.volumes, i);
-        
-        // 模擬波動度 (ADV) 與布林帶寬 (BDV) 離差
-        const adv = Math.min(Math.max(sdv * 0.9 + (vdv * 0.1), 10), 90);
-        const bdv = Math.min(Math.max(sdv * 0.8 + 10, 10), 90);
-
-        // 多週期動能差額 Δ1, Δ5, Δ10
-        const delta1_sdv = i >= 1 ? sdv - this.calculateTScore(this.prices, i - 1) : 0;
-        const delta5_sdv = i >= 5 ? sdv - this.calculateTScore(this.prices, i - 5) : 0;
-        const delta10_sdv = i >= 10 ? sdv - this.calculateTScore(this.prices, i - 10) : 0;
-
-        return {
-            index: i,
-            price: this.prices[i],
-            sdv, vdv, adv, bdv,
-            delta1_sdv, delta5_sdv, delta10_sdv
-        };
-    }
-
-    getLatestAnalysis() {
-        return this.getAnalysisAtIndex(this.prices.length - 1);
-    }
-
-    // 歷史決策訊號檢索 (指定天數，如 120 交易日)
-    getHistorySignals(days = 120) {
-        const signals = [];
-        const startIndex = Math.max(this.windowSize, this.prices.length - days);
-        let activeTrade = null;
-
-        for (let i = startIndex; i < this.prices.length; i++) {
-            const analysis = this.getAnalysisAtIndex(i);
-
-            // 4-Layer 共振買進條件：SDV 突破 60 且 VDV 強勢，或 SDV < 30 極致超買反彈
-            if (!activeTrade) {
-                if (analysis.sdv > 60 && analysis.vdv > 58 && analysis.delta5_sdv > 5) {
-                    activeTrade = {
-                        buyDate: `T-${this.prices.length - i} 日`,
-                        buyPrice: analysis.price,
-                        buySignal: "主升段量價突破"
-                    };
-                } else if (analysis.sdv < 30 && analysis.delta1_sdv > 2) {
-                    activeTrade = {
-                        buyDate: `T-${this.prices.length - i} 日`,
-                        buyPrice: analysis.price,
-                        buySignal: "超賣 Squeeze 臨界點"
-                    };
-                }
-            } 
-            // 出場條件：SDV > 72 極致超買獲利停利，或動能衰退
-            else {
-                if (analysis.sdv > 72 || analysis.delta5_sdv < -8) {
-                    activeTrade.sellDate = `T-${this.prices.length - i} 日`;
-                    activeTrade.sellPrice = analysis.price;
-                    activeTrade.sellSignal = "波段高點停利離場";
-                    signals.push(activeTrade);
-                    activeTrade = null;
-                }
-            }
-        }
-
-        if (activeTrade) {
-            signals.push(activeTrade); // 保留尚未平倉的持股
-        }
-
-        return signals;
-    }
-}
+    return { l1, l2, l3, l4 };
+  }
+};
