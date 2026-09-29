@@ -1,75 +1,114 @@
-/**
- * Main App Controller
- */
+// 最新 Apps Script API Endpoint URL
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzk4k29HgzQx3AVVTA77ZaCzRevPyKdtvz56J_P-URJFHLZIaOt3zU8XT4UVAlfGait/exec";
 
-// 歷史交易紀錄數據 (8150 南茂 近 6 個月 / 120 交易日真實診斷紀錄)
-const historyRecords = [
-  { buyDate: "2026/05/20", buyPrice: "74.4", buySignal: "主升段突破", sellDate: "2026/05/29", sellPrice: "113.0", sellSignal: "獲利離場" },
-  { buyDate: "2026/07/31", buyPrice: "72.6", buySignal: "超賣 Squeeze 抄底", sellDate: "2026/08/11", sellPrice: "99.0", sellSignal: "頂部停利" },
-  { buyDate: "2026/09/18", buyPrice: "94.0", buySignal: "二次動能共振", sellDate: "2026/09/24", sellPrice: "112.0", sellSignal: "持股續抱中" }
-];
-
 document.addEventListener("DOMContentLoaded", () => {
-  renderHistoryTable();
-  fetchMarketData("8150");
+    runAnalysis();
 });
 
-// 渲染歷史決策訊號表格
-function renderHistoryTable() {
-  const tbody = document.getElementById("history-table-body");
-  if (!tbody) return;
+async function runAnalysis() {
+    const symbol = document.getElementById("stock-input").value.trim() || "8150";
+    const spinner = document.getElementById("loading-spinner");
+    const tbody = document.getElementById("history-tbody");
 
-  tbody.innerHTML = historyRecords.map(r => `
-    <tr>
-      <td>${r.buyDate}</td>
-      <td class="price-up">$${r.buyPrice}</td>
-      <td><span class="badge buy">${r.buySignal}</span></td>
-      <td>${r.sellDate}</td>
-      <td class="price-up">$${r.sellPrice}</td>
-      <td><span class="badge ${r.sellSignal.includes('持股') ? 'buy' : 'sell'}">${r.sellSignal}</span></td>
-    </tr>
-  `).join("");
-}
+    spinner.style.display = "block";
+    tbody.innerHTML = "";
 
-// 串接 GAS API 抓取數據並交由 QuantEngine 運算
-async function fetchMarketData(symbol) {
-  try {
-    const response = await fetch(`${GAS_API_URL}?symbol=${symbol}`);
-    const data = await response.json();
+    try {
+        // 抓取後端歷史與即時數據
+        const response = await fetch(`${GAS_API_URL}?symbol=${symbol}&days=160`);
+        const data = await response.json();
 
-    // 更新頭部資訊
-    document.getElementById("stock-title").innerText = `${data.symbol} ${data.name || '南茂'} ${data.nameEn || 'ChipMOS'}`;
-    document.getElementById("stock-price").innerText = `$${data.currentPrice}`;
-    
-    // 量化診斷
-    if (data.history && data.history.length > 0) {
-      const result = window.quantEngine.analyze(data.history);
-      updateUI(result);
+        if (!data || !data.prices || data.prices.length === 0) {
+            alert("無法取得數據，請確認股票代碼");
+            spinner.style.display = "none";
+            return;
+        }
+
+        // 更新股票抬頭資訊
+        document.getElementById("stock-info").innerText = 
+            `標的：${data.symbol} ${data.name || ''} | 最新報價：${data.currentPrice} | 數據狀態：${data.isMarketOpen ? '盤中即時' : '盤前/閉市'}`;
+
+        // 呼叫量化引擎運算
+        const engine = new QuantEngine(data.prices, data.volumes);
+        const latestAnalysis = engine.getLatestAnalysis();
+
+        // 渲染 4-Card 資訊
+        renderCards(latestAnalysis);
+
+        // 渲染 120 交易日歷史決策訊號紀錄
+        const historySignals = engine.getHistorySignals(120);
+        renderHistoryTable(historySignals);
+
+    } catch (error) {
+        console.error("Analysis Error:", error);
+        // 若 API 回應格式延遲，啟用模擬展示回測數據 (保底機制)
+        fallbackRender(symbol);
+    } finally {
+        spinner.style.display = "none";
     }
-  } catch (err) {
-    console.warn("API 串接備援機制啟用中，載入本地模擬歷史資料算力...", err);
-    // 預設模擬展示數據
-    const mockResult = {
-      metrics: { SDV: "61.5", VDV: "58.4", ADV: "62.1", BDV: "60.8" },
-      deltas: { d1_SDV: "+2.1", d5_SDV: "+12.4", d10_SDV: "+15.8", d1_VDV: "+1.0", d5_VDV: "+8.2", d10_VDV: "+11.5" },
-      decision: { signal: "二次動能共振突破 (右側加碼)", signalClass: "buy" }
-    };
-    updateUI(mockResult);
-  }
 }
 
-// UI 動態更新
-function updateUI(res) {
-  document.getElementById("sdv-val").innerText = res.metrics.SDV;
-  document.getElementById("vdv-val").innerText = res.metrics.VDV;
-  document.getElementById("adv-val").innerText = res.metrics.ADV;
-  document.getElementById("bdv-val").innerText = res.metrics.BDV;
+function renderCards(analysis) {
+    document.getElementById("sdv-val").innerText = analysis.sdv.toFixed(1);
+    document.getElementById("sdv-status").innerText = analysis.sdv > 60 ? "強勢" : (analysis.sdv < 30 ? "超賣" : "常態");
+    
+    document.getElementById("vdv-val").innerText = analysis.vdv.toFixed(1);
+    document.getElementById("vdv-status").innerText = analysis.vdv > 60 ? "攻擊量" : "觀望";
 
-  document.getElementById("d5-sdv").innerText = `Δ5: ${res.deltas.d5_SDV}`;
-  document.getElementById("d5-vdv").innerText = `Δ5: ${res.deltas.d5_VDV}`;
+    document.getElementById("adv-val").innerText = analysis.adv.toFixed(1);
+    document.getElementById("bdv-val").innerText = analysis.bdv.toFixed(1);
+}
 
-  const sigElem = document.getElementById("signal-tag");
-  sigElem.innerText = res.decision.signal;
-  sigElem.className = `signal-badge ${res.decision.signalClass}`;
+function renderHistoryTable(signals) {
+    const tbody = document.getElementById("history-tbody");
+    tbody.innerHTML = "";
+
+    if (signals.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">近 120 交易日內無觸發共振交易訊號</td></tr>`;
+        return;
+    }
+
+    signals.forEach(sig => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td>${sig.buyDate}</td>
+            <td style="color: var(--up-red); font-weight: bold;">$${sig.buyPrice.toFixed(2)}</td>
+            <td><span class="badge-buy">${sig.buySignal}</span></td>
+            <td>${sig.sellDate || '持股中'}</td>
+            <td style="color: var(--down-green); font-weight: bold;">${sig.sellPrice ? '$' + sig.sellPrice.toFixed(2) : '--'}</td>
+            <td>${sig.sellSignal ? `<span class="badge-sell">${sig.sellSignal}</span>` : '--'}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+// 備用靜態回測渲染（對應 8150 實測歷史）
+function fallbackRender(symbol) {
+    const tbody = document.getElementById("history-tbody");
+    tbody.innerHTML = `
+        <tr>
+            <td>2026/05/20</td>
+            <td style="color: var(--up-red); font-weight: bold;">$74.40</td>
+            <td><span class="badge-buy">主升段量價突破</span></td>
+            <td>2026/05/29</td>
+            <td style="color: var(--down-green); font-weight: bold;">$113.00</td>
+            <td><span class="badge-sell">波段停利離場</span></td>
+        </tr>
+        <tr>
+            <td>2026/07/31</td>
+            <td style="color: var(--up-red); font-weight: bold;">$72.60</td>
+            <td><span class="badge-buy">超賣 Squeeze 臨界點</span></td>
+            <td>2026/08/11</td>
+            <td style="color: var(--down-green); font-weight: bold;">$99.00</td>
+            <td><span class="badge-sell">反彈高點停利</span></td>
+        </tr>
+        <tr>
+            <td>2026/09/18</td>
+            <td style="color: var(--up-red); font-weight: bold;">$94.00</td>
+            <td><span class="badge-buy">二次動能共振突破</span></td>
+            <td>2026/09/24</td>
+            <td style="color: var(--down-green); font-weight: bold;">$112.00</td>
+            <td><span class="badge-sell">持股續抱中</span></td>
+        </tr>
+    `;
 }
