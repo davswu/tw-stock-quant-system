@@ -1,5 +1,6 @@
 /**
  * QuantDecisionEngine - 對數標準化 (T-Score) 與共振決策矩陣運算引擎 (完整對齊版)
+ * 新增：動態移動停損停利與倉位管理 (表 A / 表 B / 表 C)
  */
 class QuantDecisionEngine {
     constructor(rawData) {
@@ -10,7 +11,7 @@ class QuantDecisionEngine {
     calculateDerivedMetrics() {
         const len = this.rawData.length;
         let trs = [];
-        
+
         for (let i = 0; i < len; i++) {
             if (i === 0) {
                 trs.push(this.rawData[i].high - this.rawData[i].low);
@@ -81,7 +82,11 @@ class QuantDecisionEngine {
             tScoresHistory.push({
                 date: curr.date,
                 close: curr.close,
+                high: curr.high,
+                low: curr.low,
                 volume: curr.volume,
+                atr: curr.atr,
+                bandwidth: curr.bandwidth,
                 SDV: calcTS(curr.close, lnP),
                 VDV: calcTS(curr.volume, lnV),
                 ADV: calcTS(curr.atr, lnA),
@@ -101,11 +106,12 @@ class QuantDecisionEngine {
 
         const t = ts[len - 1];
         const delta = this.computeDelta(t, ts[len - 2], ts[len - 6], ts[len - 11]);
+        const decision = this.matchDecisionMatrix(t, delta, ts, len - 1);
         return {
             current: t,
             delta: delta,
-            decision: this.matchDecisionMatrix(t, delta, ts, len - 1),
-            advRiskControl: this.evaluateADVRiskControl(t, delta)
+            decision: decision,
+            advRiskControl: this.evaluateDynamicRiskControl(t, delta, ts, len - 1, decision)
         };
     }
 
@@ -122,7 +128,7 @@ class QuantDecisionEngine {
             const t = ts[i];
             const delta = this.computeDelta(t, ts[i - 1], ts[i - 5], ts[i - 10]);
             const decision = this.matchDecisionMatrix(t, delta, ts, i);
-            const advRisk = this.evaluateADVRiskControl(t, delta);
+            const advRisk = this.evaluateDynamicRiskControl(t, delta, ts, i, decision);
 
             historySignals.push({
                 date: t.date,
@@ -133,7 +139,10 @@ class QuantDecisionEngine {
                 ADV: t.ADV,
                 BDV: t.BDV,
                 decision: decision,
-                riskAlert: advRisk.takeProfitAlert
+                riskAlert: advRisk.takeProfitAlert,
+                riskAction: advRisk.action,
+                stopLossTier: advRisk.stopLossTier,
+                positionSuggestion: advRisk.positionSuggestion
             });
         }
         return historySignals.reverse();
@@ -148,29 +157,145 @@ class QuantDecisionEngine {
         };
     }
 
-    evaluateADVRiskControl(t, delta) {
-        let stopLossMode = "", stopLossRule = "", takeProfitAlert = "常態監控中", action = "HOLD";
+    /**
+     * 依文案【附錄 5】動態移動停損停利與倉位管理（多頭版）
+     * 回傳：表 A 停損基準、表 B 停利/減碼、表 C 模式對接、風控動作
+     */
+    evaluateDynamicRiskControl(t, delta, tsHistory, currentIndex, decision) {
+        const adv = t.ADV;
+        const bdv = t.BDV;
+        const atr = t.atr || 0;
+        const close = t.close || 0;
 
-        if (t.ADV < 40) {
-            stopLossMode = "低波動蓄勢期（窄停損）";
-            stopLossRule = "進場價 -2.0% 或跌破關鍵位 (SDV < 45)";
-        } else if (t.ADV <= 60) {
-            stopLossMode = "常態順勢期（標準停損）";
-            stopLossRule = "進場價 -5.0% 或 -2.0 × ATR 防線";
+        // ---------- 表 A：動態停損基準 (ADV + BDV) ----------
+        let stopLossTier, initialStopLoss, trailingStopBasis, positionSuggestion, bdvNote;
+
+        if (adv < 40) {
+            stopLossTier = "低波動蓄勢期（窄停損）";
+            initialStopLoss = `1.5 × ATR (≈ ${(1.5 * atr).toFixed(2)} 元) 或前低`;
+            trailingStopBasis = "5 日線 / 10 日線";
+            positionSuggestion = "正常倉位";
+        } else if (adv < 50) {
+            stopLossTier = "波動收斂期（標準停損）";
+            initialStopLoss = `1.5 × ATR (≈ ${(1.5 * atr).toFixed(2)} 元) 或前低`;
+            trailingStopBasis = "5 日線 / 10 日線";
+            positionSuggestion = "正常倉位";
+        } else if (adv < 60) {
+            stopLossTier = "常態波動期（標準停損）";
+            initialStopLoss = `2.0 × ATR (≈ ${(2.0 * atr).toFixed(2)} 元)`;
+            trailingStopBasis = "10 日線 / 前波低點";
+            positionSuggestion = "正常倉位";
+        } else if (adv < 70) {
+            stopLossTier = "波動擴張期（移動緊縮）";
+            initialStopLoss = `2.5 × ATR (≈ ${(2.5 * atr).toFixed(2)} 元)`;
+            trailingStopBasis = "Chandelier Exit 2.5 ATR";
+            positionSuggestion = "減 1/4 倉";
         } else {
-            stopLossMode = "高波動爆發期（移動緊縮停損）";
-            stopLossRule = "自波段最高價回檔 -3.0% (Trailing Stop)";
+            stopLossTier = "極致劇烈期（移動寬停損）";
+            initialStopLoss = `3.0 × ATR (≈ ${(3.0 * atr).toFixed(2)} 元) 或前低 -1 ATR`;
+            trailingStopBasis = "收盤確認，不追價";
+            positionSuggestion = "減半倉";
         }
 
+        // BDV 補充說明
+        if (bdv < 40) {
+            bdvNote = "BDV<40：停損不宜過緊，可用通道下緣或突破頸線";
+        } else if (bdv < 70) {
+            bdvNote = "BDV 60~70：趨勢擴張，可順勢跟隨";
+        } else {
+            bdvNote = "BDV≥70：通道張裂頂點，停利分批、停損放寬但倉位降";
+        }
+
+        // 極端共振：ADV≥70 且 BDV≥70
+        if (adv >= 70 && bdv >= 70) {
+            bdvNote = "ADV≥70 且 BDV≥70：停損放寬、倉位減半、停利分批";
+        }
+
+        // ---------- 表 B：動態停利與減碼 (SDV + VDV + Δ) ----------
+        let takeProfitAlerts = [];
+        let action = "HOLD";
+
+        // 條件 1：SDV≥70 且 (VDV≥70 或 VDV<40 背離)
+        if (t.SDV >= 70 && (t.VDV >= 70 || t.VDV < 40)) {
+            takeProfitAlerts.push("SDV≥70 且 VDV≥70 或 <40 背離 → 減碼 1/3~1/2");
+            action = "REDUCE_HALF";
+        }
+
+        // 條件 2：ΔSDV₅ ≤ -3 且 ΔVDV₅ ≤ -3
+        if (delta.SDV_5 <= -3 && delta.VDV_5 <= -3) {
+            takeProfitAlerts.push("ΔSDV₅≤-3 且 ΔVDV₅≤-3 → 再減碼");
+            action = (action === "REDUCE_HALF") ? "REDUCE_MORE" : "REDUCE_HALF";
+        }
+
+        // 條件 3：BDV 曾 ≥70 後 ΔBDV₅ ≤ -3 → 收緊停利
+        if (tsHistory && currentIndex > 10) {
+            const lookback = tsHistory.slice(Math.max(0, currentIndex - 10), currentIndex);
+            const hadHighBDV = lookback.some(d => d && d.BDV >= 70);
+            if (hadHighBDV && delta.BDV_5 <= -3) {
+                takeProfitAlerts.push("BDV≥70 後 ΔBDV₅≤-3 → 收緊停利");
+            }
+        }
+
+        // 條件 4：SDV 跌破 50 且 VDV ≥ 60 → 全數出場
+        if (t.SDV < 50 && t.VDV >= 60) {
+            takeProfitAlerts.push("SDV 跌破 50 且 VDV≥60 → 全數出場");
+            action = "EXIT_FULL";
+        }
+
+        // 極端拐點：SDV≥65 且 ADV≥70 且 ΔADV₁ ≤ -3
         if (t.SDV >= 65 && t.ADV >= 70 && delta.ADV_1 <= -3.0) {
-            takeProfitAlert = "觸發【過熱噴發拐點停利 (Blow-off Top)】";
-            action = "EXIT_FULL";
-        } else if (t.SDV >= 70 && t.BDV >= 70 && delta.SDV_1 <= -3.0) {
-            takeProfitAlert = "觸發【雙重離差過熱防線 (SDV + BDV 共振)】";
+            takeProfitAlerts.unshift("⚡ 觸發【過熱噴發拐點停利】SDV≥65 & ADV≥70 & ΔADV₁≤-3");
             action = "EXIT_FULL";
         }
 
-        return { stopLossMode, stopLossRule, takeProfitAlert, action };
+        // 雙重離差：SDV≥70 且 BDV≥70 且 ΔSDV₁ ≤ -3
+        if (t.SDV >= 70 && t.BDV >= 70 && delta.SDV_1 <= -3.0) {
+            takeProfitAlerts.unshift("⚡ 觸發【雙重離差過熱防線】SDV≥70 & BDV≥70 & ΔSDV₁≤-3");
+            action = "EXIT_FULL";
+        }
+
+        const takeProfitAlert = takeProfitAlerts.length > 0
+            ? takeProfitAlerts.join(" ｜ ")
+            : "常態監控中";
+
+        // ---------- 表 C：與四種買進模式對接 ----------
+        const entryModeMapping = {
+            "蓄勢突破": {
+                stopLoss: "突破頸線／帶寬上緣 -1~1.5 ATR",
+                takeProfit: "SDV≥70 且 VDV<40 減 1/3"
+            },
+            "順勢拉回": {
+                stopLoss: "加碼區下緣 -1.5 ATR，上移 10 日線",
+                takeProfit: "BDV≥70 或 ΔSDV₅≤-3 減碼"
+            },
+            "假跌破掃蕩": {
+                stopLoss: "假跌破低點 -1 ATR",
+                takeProfit: "收復後 SDV 60 遇壓減碼"
+            },
+            "極致超跌": {
+                stopLoss: "低點 -2~3 ATR",
+                takeProfit: "SDV 回 50~60 遇壓、BDV 收縮全出"
+            }
+        };
+
+        const modeName = decision && decision.name ? decision.name : null;
+        const modeMapping = modeName && entryModeMapping[modeName]
+            ? entryModeMapping[modeName]
+            : null;
+
+        return {
+            stopLossTier,
+            initialStopLoss,
+            trailingStopBasis,
+            positionSuggestion,
+            bdvNote,
+            takeProfitAlert,
+            takeProfitAlerts,
+            action,
+            entryModeName: modeName,
+            entryModeStopLoss: modeMapping ? modeMapping.stopLoss : "—",
+            entryModeTakeProfit: modeMapping ? modeMapping.takeProfit : "—"
+        };
     }
 
     matchDecisionMatrix(t, d, tsHistory, currentIndex) {

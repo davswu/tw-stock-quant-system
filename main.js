@@ -48,7 +48,7 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
     const cardSignal = document.getElementById("cardSignal");
     badge.innerText = `${decision.name} | ${decision.signal}`;
 
-    // 台股配色語意：多頭/買進用亮紅 (rose/red)，空頭/賣出用亮綠 (emerald/green)，中性用天空藍 (sky)
+    // 台股配色語意：多頭/買進用亮紅，空頭/賣出用亮綠，中性用天空藍，警示用琥珀
     if (decision.color === "red") {
         cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-rose-500/80 flex flex-col justify-between shadow-lg shadow-rose-500/10";
         badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-rose-500/20 text-rose-400 border border-rose-500/30 text-center";
@@ -69,14 +69,8 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
     updateCard("adv", current.ADV, getADVLevelDesc(current.ADV));
     updateCard("bdv", current.BDV, getBDVLevelDesc(current.BDV));
 
-    document.getElementById("advStopLossMode").innerText = advRiskControl.stopLossMode;
-    document.getElementById("advStopLossRule").innerText = advRiskControl.stopLossRule;
-    
-    const tpAlertElem = document.getElementById("advTakeProfitAlert");
-    tpAlertElem.innerText = advRiskControl.takeProfitAlert;
-    tpAlertElem.className = advRiskControl.action === "EXIT_FULL" 
-        ? "text-sm font-bold text-emerald-400 bg-emerald-950/50 p-2 rounded border border-emerald-500/50 animate-pulse"
-        : "text-sm font-semibold text-sky-400";
+    // ---------- 動態風控樞紐渲染 (表 A / 表 B / 表 C) ----------
+    renderRiskControl(advRiskControl);
 
     document.getElementById("deltaMatrixBody").innerHTML = `
         ${renderRow("SDV (股價離差)", current.SDV, delta.SDV_1, delta.SDV_5, delta.SDV_10)}
@@ -88,6 +82,39 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
     renderHistoryTable(history);
 }
 
+function renderRiskControl(rc) {
+    // 表 A
+    document.getElementById("stopLossTier").innerText = rc.stopLossTier;
+    document.getElementById("initialStopLoss").innerText = rc.initialStopLoss;
+    document.getElementById("trailingStopBasis").innerText = rc.trailingStopBasis;
+    document.getElementById("positionSuggestion").innerText = rc.positionSuggestion;
+    document.getElementById("bdvNote").innerText = rc.bdvNote;
+
+    // 表 B
+    const tpElem = document.getElementById("advTakeProfitAlert");
+    const isAlert = rc.takeProfitAlert !== "常態監控中";
+    tpElem.innerText = rc.takeProfitAlert;
+    tpElem.className = isAlert
+        ? "text-sm font-bold text-amber-300 bg-amber-950/40 p-2 rounded border border-amber-500/50 leading-relaxed"
+        : "text-sm font-semibold text-sky-400";
+
+    const actionElem = document.getElementById("riskActionBadge");
+    const actionMap = {
+        "HOLD": { text: "續抱監控", cls: "bg-sky-500/20 text-sky-300 border-sky-500/40" },
+        "REDUCE_HALF": { text: "減碼 1/3~1/2", cls: "bg-amber-500/20 text-amber-300 border-amber-500/40" },
+        "REDUCE_MORE": { text: "再減碼", cls: "bg-amber-500/20 text-amber-300 border-amber-500/40" },
+        "EXIT_FULL": { text: "全數出場", cls: "bg-rose-500/20 text-rose-300 border-rose-500/40" }
+    };
+    const am = actionMap[rc.action] || actionMap["HOLD"];
+    actionElem.innerText = am.text;
+    actionElem.className = `inline-block px-2 py-1 rounded text-xs font-bold border ${am.cls}`;
+
+    // 表 C
+    document.getElementById("entryModeName").innerText = rc.entryModeName || "—";
+    document.getElementById("entryModeStopLoss").innerText = rc.entryModeStopLoss;
+    document.getElementById("entryModeTakeProfit").innerText = rc.entryModeTakeProfit;
+}
+
 function updateCard(type, val, desc) {
     document.getElementById(`${type}Value`).innerText = val.toFixed(1);
     document.getElementById(`${type}Status`).innerText = desc;
@@ -95,6 +122,7 @@ function updateCard(type, val, desc) {
 
 function renderRow(label, curr, d1, d5, d10) {
     const formatD = (val) => {
+        // 依文案：Δ 正值（動能擴張/強勢）用玫瑰紅，Δ 負值（動能收斂/弱勢）用翠綠，0 用灰
         const color = val > 0 ? "text-rose-400" : val < 0 ? "text-emerald-400" : "text-slate-400";
         const sign = val > 0 ? "+" : "";
         return `<span class="${color}">${sign}${val.toFixed(1)}</span>`;
@@ -115,11 +143,11 @@ function renderHistoryTable(history) {
     if (!tbody) return;
 
     if (!history || history.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-slate-500">尚無歷史決策資料</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-slate-500">尚無歷史決策資料</td></tr>`;
         return;
     }
 
-    let buyCount = 0, exitCount = 0;
+    let buyCount = 0, exitCount = 0, riskAlertCount = 0;
 
     tbody.innerHTML = history.map(item => {
         const dec = item.decision;
@@ -135,20 +163,39 @@ function renderHistoryTable(history) {
             exitCount++;
         }
 
+        const isRiskAlert = item.riskAlert && item.riskAlert !== "常態監控中";
+        if (isRiskAlert) riskAlertCount++;
+
+        // 風控動作顯示
+        const actionMap = {
+            "HOLD": { text: "續抱", cls: "text-sky-400" },
+            "REDUCE_HALF": { text: "減碼", cls: "text-amber-400 font-bold" },
+            "REDUCE_MORE": { text: "再減碼", cls: "text-amber-400 font-bold" },
+            "EXIT_FULL": { text: "全出", cls: "text-rose-400 font-bold" }
+        };
+        const am = actionMap[item.riskAction] || actionMap["HOLD"];
+        const actionHtml = `<span class="${am.cls}">${am.text}</span>`;
+
+        const riskCell = isRiskAlert
+            ? `<span class="text-amber-300 font-bold">${item.riskAlert}</span>`
+            : `<span class="text-slate-500">${dec.desc}</span>`;
+
         return `
             <tr class="hover:bg-slate-700/40 border-b border-slate-700/40 transition">
-                <td class="p-3 font-mono text-slate-300">${item.date}</td>
-                <td class="p-3 font-mono font-bold text-slate-200">NT$ ${item.close.toFixed(2)}</td>
+                <td class="p-3 font-mono text-slate-300 text-xs">${item.date}</td>
+                <td class="p-3 font-mono font-bold text-slate-200">${item.close.toFixed(2)}</td>
                 <td class="p-3 font-mono text-slate-400">${item.SDV.toFixed(1)}</td>
                 <td class="p-3 font-mono text-slate-400">${item.VDV.toFixed(1)}</td>
-                <td class="p-3 font-mono text-slate-400">${item.ADV.toFixed(1)} / ${item.BDV.toFixed(1)}</td>
+                <td class="p-3 font-mono text-slate-400 text-xs">${item.ADV.toFixed(1)} / ${item.BDV.toFixed(1)}</td>
                 <td class="p-3"><span class="px-2 py-1 rounded text-xs font-bold ${badgeClass}">${dec.name}</span></td>
-                <td class="p-3 text-xs text-slate-400">${item.riskAlert !== "常態監控中" ? `<span class="text-emerald-400 font-bold">${item.riskAlert}</span>` : dec.desc}</td>
+                <td class="p-3 text-xs">${actionHtml}</td>
+                <td class="p-3 text-xs text-slate-400 text-left max-w-md">${riskCell}</td>
             </tr>
         `;
     }).join("");
 
-    document.getElementById("historySummary").innerText = `近 6 個月 (120 交易日) 實時回測：觸發 ${buyCount} 次買進/加碼，${exitCount} 次平倉/風控。`;
+    document.getElementById("historySummary").innerText =
+        `近 6 個月 (120 交易日) 實時回測：觸發 ${buyCount} 次買進/加碼，${exitCount} 次平倉/風控，${riskAlertCount} 次動態停利警示。`;
 }
 
 // 根據說明文案實作四大指標專屬位階定義

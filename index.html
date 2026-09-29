@@ -10,18 +10,18 @@
 <body class="bg-slate-900 text-slate-100 min-h-screen p-4 md:p-8">
 
     <div class="max-w-7xl mx-auto space-y-6">
-        
+
         <!-- Header & 搜尋欄 -->
         <header class="flex flex-col md:flex-row justify-between items-center bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg gap-4">
             <div>
                 <h1 class="text-2xl font-bold text-sky-400">台股實時四指標與系統決策矩陣</h1>
-                <p class="text-sm text-slate-400 mt-1">對數標準化 (T-Score) + 多週期動能 (Δ₁ / Δ₅ / Δ₁₀) + ADV 動態移動風控 + 6個月歷史訊號追蹤</p>
+                <p class="text-sm text-slate-400 mt-1">對數標準化 (T-Score) + 多週期動能 (Δ₁ / Δ₅ / Δ₁₀) + 動態移動停損停利 + 6個月歷史訊號追蹤</p>
             </div>
-            
+
             <div class="flex items-center space-x-2 w-full md:w-auto">
-                <input type="text" id="stockInput" value="2330" placeholder="輸入台股代碼 (如 8150)" 
+                <input type="text" id="stockInput" value="2330" placeholder="輸入台股代碼 (如 8150)"
                        class="bg-slate-900 border border-slate-600 px-4 py-2 rounded-lg text-white font-mono focus:outline-none focus:border-sky-500 w-full md:w-48">
-                <button onclick="analyzeStock()" 
+                <button onclick="analyzeStock()"
                         class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded-lg font-bold transition text-white whitespace-nowrap">
                     實時分析
                 </button>
@@ -65,7 +65,7 @@
                 <div id="sdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
                 <div id="sdvStatus" class="text-xs mt-2 text-slate-400">--</div>
             </div>
-            
+
             <div class="bg-slate-800 p-5 rounded-xl border border-slate-700">
                 <div class="text-sm font-bold text-slate-400 mb-1">資金強度 (VDV)</div>
                 <div id="vdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
@@ -85,26 +85,73 @@
             </div>
         </div>
 
-        <!-- ADV 波動度驅動之動態移動風控樞紐區塊 -->
+        <!-- 動態移動停損停利樞紐區塊 (表 A / 表 B / 表 C) -->
         <div class="bg-slate-800/90 p-6 rounded-xl border border-sky-500/30 shadow-xl space-y-4">
-            <div class="flex items-center justify-between border-b border-slate-700 pb-3">
+            <div class="flex flex-wrap items-center justify-between border-b border-slate-700 pb-3 gap-2">
                 <h3 class="text-lg font-bold text-sky-400 flex items-center gap-2">
-                    🛡️ ADV 波動度驅動之動態移動風控樞紐 (Trailing Risk Control)
+                    🛡️ 動態移動停損停利與倉位管理樞紐
                 </h3>
-                <span class="text-xs px-2.5 py-1 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/20">適應型移動風控</span>
+                <div class="flex items-center gap-2">
+                    <span id="riskActionBadge" class="inline-block px-2 py-1 rounded text-xs font-bold border bg-sky-500/20 text-sky-300 border-sky-500/40">續抱監控</span>
+                    <span class="text-xs px-2.5 py-1 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/20">第五層持倉管理</span>
+                </div>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-700/80">
-                    <div class="text-xs text-slate-400 mb-1">當前 ADV 停損模式 (Dynamic Stop-Loss)</div>
-                    <div id="advStopLossMode" class="text-sm font-bold text-amber-400">--</div>
-                    <div id="advStopLossRule" class="text-xs text-slate-300 mt-2 leading-relaxed">--</div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <!-- 表 A：動態停損基準 -->
+                <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-700/80 space-y-2">
+                    <div class="text-xs font-bold text-sky-300 border-b border-slate-700 pb-1">【表 A】動態停損基準（ADV + BDV）</div>
+                    <div class="space-y-1.5 text-xs">
+                        <div class="flex justify-between gap-2">
+                            <span class="text-slate-400">停損層級</span>
+                            <span id="stopLossTier" class="text-amber-300 font-bold text-right">--</span>
+                        </div>
+                        <div class="flex justify-between gap-2">
+                            <span class="text-slate-400">初始停損</span>
+                            <span id="initialStopLoss" class="text-slate-200 text-right">--</span>
+                        </div>
+                        <div class="flex justify-between gap-2">
+                            <span class="text-slate-400">移動基準</span>
+                            <span id="trailingStopBasis" class="text-slate-200 text-right">--</span>
+                        </div>
+                        <div class="flex justify-between gap-2">
+                            <span class="text-slate-400">倉位建議</span>
+                            <span id="positionSuggestion" class="text-rose-300 font-bold text-right">--</span>
+                        </div>
+                        <div class="pt-1 border-t border-slate-700/60">
+                            <div id="bdvNote" class="text-slate-400 leading-relaxed">--</div>
+                        </div>
+                    </div>
                 </div>
 
-                <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-700/80">
-                    <div class="text-xs text-slate-400 mb-1">極致爆發移動停利監控 (Trailing Take-Profit)</div>
-                    <div id="advTakeProfitAlert" class="text-sm font-semibold text-emerald-400">常態監控中</div>
-                    <div class="text-xs text-slate-400 mt-2">觸發條件：SDV ≥ 65 & ADV ≥ 70 且 Δ₁ADV ≤ -3.0 (情緒爆發拐點出場)</div>
+                <!-- 表 B：動態停利與減碼 -->
+                <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-700/80 space-y-2">
+                    <div class="text-xs font-bold text-emerald-300 border-b border-slate-700 pb-1">【表 B】動態停利與減碼（SDV + VDV + Δ）</div>
+                    <div id="advTakeProfitAlert" class="text-sm font-semibold text-sky-400 leading-relaxed">
+                        常態監控中
+                    </div>
+                    <div class="text-[11px] text-slate-500 leading-relaxed pt-1 border-t border-slate-700/60">
+                        觸發邏輯：SDV≥70 且 VDV≥70 或 VDV<40 背離 → 減碼 1/3~1/2；ΔSDV₅≤-3 且 ΔVDV₅≤-3 → 再減碼；SDV 跌破 50 且 VDV≥60 → 全數出場。
+                    </div>
+                </div>
+
+                <!-- 表 C：與買進模式對接 -->
+                <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-700/80 space-y-2">
+                    <div class="text-xs font-bold text-amber-300 border-b border-slate-700 pb-1">【表 C】與買進模式對接</div>
+                    <div class="space-y-1.5 text-xs">
+                        <div class="flex justify-between gap-2">
+                            <span class="text-slate-400">當前模式</span>
+                            <span id="entryModeName" class="text-slate-200 font-bold text-right">—</span>
+                        </div>
+                        <div class="pt-1 border-t border-slate-700/60">
+                            <div class="text-slate-400 mb-1">動態停損</div>
+                            <div id="entryModeStopLoss" class="text-slate-200 leading-relaxed">—</div>
+                        </div>
+                        <div class="pt-1 border-t border-slate-700/60">
+                            <div class="text-slate-400 mb-1">動態停利</div>
+                            <div id="entryModeTakeProfit" class="text-slate-200 leading-relaxed">—</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -114,7 +161,7 @@
             <h3 class="text-lg font-bold text-slate-200 mb-4">
                 多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)
             </h3>
-            
+
             <div class="overflow-x-auto">
                 <table class="w-full text-center text-sm border-collapse">
                     <thead>
@@ -147,7 +194,7 @@
 
             <div class="overflow-x-auto max-h-96 overflow-y-auto">
                 <table class="w-full text-center text-sm border-collapse">
-                    <thead class="sticky top-0 bg-slate-900 text-slate-400 border-b border-slate-700">
+                    <thead class="sticky top-0 bg-slate-900 text-slate-400 border-b border-slate-700 z-10">
                         <tr>
                             <th class="p-3 text-left">交易日期</th>
                             <th class="p-3">收盤價</th>
@@ -155,11 +202,12 @@
                             <th class="p-3">VDV</th>
                             <th class="p-3">ADV / BDV</th>
                             <th class="p-3">觸發決策名稱</th>
+                            <th class="p-3">風控動作</th>
                             <th class="p-3 text-left">風控與診斷說明</th>
                         </tr>
                     </thead>
                     <tbody id="historyTableBody" class="divide-y divide-slate-700/50">
-                        <tr><td colspan="7" class="p-4 text-slate-500">點擊「實時分析」進行動態計算...</td></tr>
+                        <tr><td colspan="8" class="p-4 text-slate-500">點擊「實時分析」進行動態計算...</td></tr>
                     </tbody>
                 </table>
             </div>
