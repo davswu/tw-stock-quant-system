@@ -1,5 +1,5 @@
 /**
- * QuantDecisionEngine - 對數標準化 (T-Score) 與共振決策矩陣運算引擎 (完整對齊版)
+ * QuantDecisionEngine - 對數標準化 (T-Score) 與共振決策矩陣運算引擎
  */
 class QuantDecisionEngine {
     constructor(rawData) {
@@ -177,7 +177,7 @@ class QuantDecisionEngine {
         const { SDV, VDV, ADV, BDV } = t;
         const prevT1 = currentIndex > 0 ? tsHistory[currentIndex - 1] : null;
 
-        // 1. 蓄勢突破 (買進首筆)
+        // 1. 蓄勢突破
         if (ADV >= 40 && ADV <= 50 && BDV < 40 && SDV >= 50 && SDV <= 60 && VDV >= 60 &&
             d.SDV_10 >= 3 && d.VDV_10 > 0 && d.ADV_10 <= 0 && d.BDV_10 <= -3 &&
             d.SDV_5 >= 3 && d.VDV_5 >= 3 && d.ADV_5 >= -3 && d.ADV_5 <= 3 && d.BDV_5 <= -3 &&
@@ -185,7 +185,7 @@ class QuantDecisionEngine {
             return { action: "BUY_FIRST", name: "蓄勢突破", signal: "買進 (首筆)", color: "red", desc: "變盤蓄勢完成，主力放量衝過中軸，啟動強烈突破。" };
         }
 
-        // 2. 順勢拉回 (加碼二次)
+        // 2. 順勢拉回
         if (ADV >= 40 && ADV <= 50 && BDV >= 50 && BDV <= 60 && SDV >= 50 && SDV <= 59 && VDV < 40 &&
             d.SDV_10 >= 3 && d.VDV_10 >= 3 && d.ADV_10 >= -3 && d.ADV_10 <= 3 && d.BDV_10 >= 3 &&
             d.SDV_5 >= -3 && d.SDV_5 <= 0 && d.VDV_5 <= -3 && d.ADV_5 <= 0 && d.BDV_5 >= -3 && d.BDV_5 <= 3 &&
@@ -193,7 +193,7 @@ class QuantDecisionEngine {
             return { action: "BUY_ADD", name: "順勢拉回", signal: "加碼 (二次)", color: "red", desc: "主升段拉回無量洗盤結束，出現止跌陽線重啟攻勢。" };
         }
 
-        // 3. 假跌破掃蕩 (買進)
+        // 3. 假跌破掃蕩
         const brokeUnder50AndRecovered = prevT1 && prevT1.SDV < 50 && SDV >= 50;
         if (ADV >= 50 && ADV <= 60 && BDV < 50 && brokeUnder50AndRecovered && (VDV < 40 || VDV >= 60) &&
             d.SDV_10 >= 0 && d.VDV_10 >= 0 && d.BDV_10 <= 0 &&
@@ -202,7 +202,7 @@ class QuantDecisionEngine {
             return { action: "BUY_BEAR_TRAP", name: "假跌破掃蕩", signal: "買進 (掃蕩)", color: "red", desc: "誘空洗盤結束，爆發長陽吞噬並強勢收復多空中軸。" };
         }
 
-        // 4. 極致超跌 (抄底)
+        // 4. 極致超跌
         if (ADV >= 70 && BDV >= 70 && SDV < 30 && VDV >= 70 &&
             d.SDV_10 <= -10 && d.VDV_10 >= 10 && d.ADV_10 >= 10 && d.BDV_10 >= 10 &&
             d.SDV_5 <= -10 && d.VDV_5 >= 3 && d.ADV_5 >= 3 && d.BDV_5 >= 3 &&
@@ -210,7 +210,7 @@ class QuantDecisionEngine {
             return { action: "BUY_BOTTOM", name: "極致超跌", signal: "抄底買進", color: "red", desc: "恐慌盤極致釋放與天量換手，出現長下影止跌訊號。" };
         }
 
-        // 5. 過熱高潮 (大獲利平倉)
+        // 5. 過熱高潮
         if (ADV >= 70 && BDV >= 70 && SDV >= 70 && (VDV >= 70 || VDV < 40) &&
             d.SDV_10 >= 10 && d.VDV_10 >= 10 && d.ADV_10 >= 10 && d.BDV_10 >= 10 &&
             d.SDV_5 < 3 && d.VDV_5 <= -3 && d.ADV_5 >= 3 &&
@@ -218,7 +218,7 @@ class QuantDecisionEngine {
             return { action: "EXIT_FULL_PROFIT", name: "過熱高潮", signal: "大獲利平倉", color: "green", desc: "情緒高潮與帶寬頂點，動能急遽放緩，拐點反轉離場。" };
         }
 
-        // 6. 動能背離 (減碼平倉 50%)
+        // 6. 動能背離
         if (ADV >= 50 && ADV <= 60 && BDV >= 60 && BDV <= 70 && SDV >= 60 && VDV < 40 &&
             d.SDV_10 >= 3 && d.VDV_10 <= -3 && d.BDV_10 >= 3 &&
             d.SDV_5 < 0 && d.VDV_5 <= -3 && d.ADV_5 <= 0 && d.BDV_5 <= 0 &&
@@ -226,7 +226,7 @@ class QuantDecisionEngine {
             return { action: "EXIT_HALF_DIVERGENCE", name: "動能背離", signal: "減碼平倉 50%", color: "amber", desc: "股價創新高但量能顯著背離，中線資金失血，防禦性減碼。" };
         }
 
-        // 7. 假突破避險 (即時賣出離場)
+        // 7. 假突破避險
         const spikedAbove60AndFell = prevT1 && prevT1.SDV > 60 && SDV < 50;
         if (ADV >= 60 && spikedAbove60AndFell && (VDV < 40 || VDV >= 60) &&
             d.SDV_10 <= 0 && d.VDV_10 <= 0 && d.ADV_10 >= 3 && d.BDV_10 >= 3 &&
@@ -235,7 +235,7 @@ class QuantDecisionEngine {
             return { action: "EXIT_FAKE_BREAKOUT", name: "假突破避險", signal: "即時賣出離場", color: "green", desc: "高位衝高誘多後長陰反殺，帶量破位，即時避險離場。" };
         }
 
-        // 8. 破位停損 (完全停損離場)
+        // 8. 破位停損
         if (ADV >= 60 && BDV >= 50 && SDV < 50 && VDV >= 60 &&
             d.SDV_10 <= -10 && d.VDV_10 >= 3 && d.ADV_10 >= 3 && d.BDV_10 >= 3 &&
             d.SDV_5 <= -3 && d.VDV_5 >= 3 && d.ADV_5 >= 3 && d.BDV_5 >= 3 &&

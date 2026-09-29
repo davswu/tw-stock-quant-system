@@ -1,9 +1,9 @@
-// 最新更新之 GAS API 部署網址
+// 請將此網址替換為您完成 GAS 部署後的 Web App URL
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzk4k29HgzQx3AVVTA77ZaCzRevPyKdtvz56J_P-URJFHLZIaOt3zU8XT4UVAlfGait/exec";
 
 async function analyzeStock() {
     const codeInput = document.getElementById("stockInput");
-    const code = codeInput ? codeInput.value.trim() : "2330";
+    const code = codeInput ? codeInput.value.trim() : "8150";
     if (!code) return;
 
     document.getElementById("decisionDesc").innerText = `正在抓取 ${code} 即時行情資料...`;
@@ -48,7 +48,7 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
     const cardSignal = document.getElementById("cardSignal");
     badge.innerText = `${decision.name} | ${decision.signal}`;
 
-    // 台股配色語意：多頭/買進用亮紅 (rose/red)，空頭/賣出用亮綠 (emerald/green)，中性用天空藍 (sky)
+    // 台股視覺語意
     if (decision.color === "red") {
         cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-rose-500/80 flex flex-col justify-between shadow-lg shadow-rose-500/10";
         badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-rose-500/20 text-rose-400 border border-rose-500/30 text-center";
@@ -63,7 +63,6 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
         badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-sky-500/20 text-sky-400 border border-sky-500/30 text-center";
     }
 
-    // 更新四大指標專屬位階文案
     updateCard("sdv", current.SDV, getSDVLevelDesc(current.SDV));
     updateCard("vdv", current.VDV, getVDVLevelDesc(current.VDV));
     updateCard("adv", current.ADV, getADVLevelDesc(current.ADV));
@@ -151,7 +150,6 @@ function renderHistoryTable(history) {
     document.getElementById("historySummary").innerText = `近 6 個月 (120 交易日) 實時回測：觸發 ${buyCount} 次買進/加碼，${exitCount} 次平倉/風控。`;
 }
 
-// 根據說明文案實作四大指標專屬位階定義
 function getSDVLevelDesc(val) {
     if (val >= 70) return "≥70 極致超買/強勢主攻";
     if (val >= 60) return "60~69 多頭強勢/趨勢延伸";
@@ -188,5 +186,4 @@ function getBDVLevelDesc(val) {
     return "<30 極致收縮/Squeeze臨界";
 }
 
-// 頁面載入完成後自動分析預設股票 (2330)
 window.onload = () => analyzeStock();
