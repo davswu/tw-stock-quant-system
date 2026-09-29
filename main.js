@@ -1,4 +1,4 @@
-// 最新更新之 GAS API 部署網址
+// 最新部署之 Google Apps Script (GAS) API 網址
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzk4k29HgzQx3AVVTA77ZaCzRevPyKdtvz56J_P-URJFHLZIaOt3zU8XT4UVAlfGait/exec";
 
 async function analyzeStock() {
@@ -6,14 +6,14 @@ async function analyzeStock() {
     const code = codeInput ? codeInput.value.trim() : "2330";
     if (!code) return;
 
-    document.getElementById("decisionDesc").innerText = `正在抓取 ${code} 即時行情資料...`;
+    document.getElementById("decisionDesc").innerText = `正在連線 GAS API 抓取 ${code} 即時行情...`;
 
     try {
         const res = await fetch(`${GAS_API_URL}?code=${encodeURIComponent(code)}`);
         const rawData = await res.json();
 
         if (!rawData || rawData.status === "error" || !rawData.data || rawData.data.length === 0) {
-            document.getElementById("decisionDesc").innerText = rawData.message || `無法取得 ${code} 行情，請確認股票代碼。`;
+            document.getElementById("decisionDesc").innerText = rawData.message || `無法取得 ${code} 行情，請檢查股票代碼。`;
             return;
         }
 
@@ -22,7 +22,7 @@ async function analyzeStock() {
         const history = engine.getHistoricalDecisionSignals(120);
 
         if (!result) {
-            document.getElementById("decisionDesc").innerText = "歷史資料筆數不足，無法計算對數 T-Score。";
+            document.getElementById("decisionDesc").innerText = "歷史資料筆數不足，無法演算對數 T-Score。";
             return;
         }
 
@@ -37,18 +37,19 @@ async function analyzeStock() {
 function updateUI(res, history, isBefore9AM, stockName, code) {
     const { current, delta, decision, advRiskControl } = res;
 
+    // 更新 Header 與股票基本數據
     document.getElementById("stockTitle").innerHTML = `<span class="text-2xl font-extrabold text-white">${code}</span> <span class="text-sm text-slate-300 font-normal mt-1">${stockName || ''}</span>`;
     document.getElementById("priceLabel").innerText = isBefore9AM ? "昨日 (T-1) 收盤價" : "當日 (T) 即時股價";
     document.getElementById("volumeLabel").innerText = isBefore9AM ? "昨日 (T-1) 成交量" : "當日 (T) 即時成交量";
     document.getElementById("stockPrice").innerText = `NT$ ${current.close.toFixed(2)}`;
     document.getElementById("stockVolume").innerText = `${Number(current.volume).toLocaleString()} 張`;
 
+    // 決策訊號與視覺卡片（符合台股標準顏色定義）
     document.getElementById("decisionDesc").innerText = `${decision.name}：${decision.desc}`;
     const badge = document.getElementById("signalBadge");
     const cardSignal = document.getElementById("cardSignal");
     badge.innerText = `${decision.name} | ${decision.signal}`;
 
-    // 台股配色語意：多頭/買進用亮紅，空頭/賣出用亮綠，減碼用琥珀黃，中性用天空藍
     if (decision.color === "red") {
         cardSignal.className = "bg-slate-800 p-5 rounded-xl border-2 border-rose-500/80 flex flex-col justify-between shadow-lg shadow-rose-500/10";
         badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-rose-500/20 text-rose-400 border border-rose-500/30 text-center";
@@ -63,12 +64,13 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
         badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-sky-500/20 text-sky-400 border border-sky-500/30 text-center";
     }
 
-    // 更新四大指標專屬位階文案
+    // 四大指標位階對照
     updateCard("sdv", current.SDV, getSDVLevelDesc(current.SDV));
     updateCard("vdv", current.VDV, getVDVLevelDesc(current.VDV));
     updateCard("adv", current.ADV, getADVLevelDesc(current.ADV));
     updateCard("bdv", current.BDV, getBDVLevelDesc(current.BDV));
 
+    // 風控樞紐
     document.getElementById("advStopLossMode").innerText = advRiskControl.stopLossMode;
     document.getElementById("advStopLossRule").innerText = advRiskControl.stopLossRule;
     
@@ -78,6 +80,7 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
         ? "text-sm font-bold text-emerald-400 bg-emerald-950/50 p-2 rounded border border-emerald-500/50 animate-pulse"
         : "text-sm font-semibold text-sky-400";
 
+    // 多週期動能矩陣
     document.getElementById("deltaMatrixBody").innerHTML = `
         ${renderRow("SDV (股價離差)", current.SDV, delta.SDV_1, delta.SDV_5, delta.SDV_10)}
         ${renderRow("VDV (量能離差)", current.VDV, delta.VDV_1, delta.VDV_5, delta.VDV_10)}
@@ -85,6 +88,7 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
         ${renderRow("BDV (帶寬離差)", current.BDV, delta.BDV_1, delta.BDV_5, delta.BDV_10)}
     `;
 
+    // 渲染配對進出場歷史交易表格
     renderHistoryTable(history);
 }
 
@@ -110,7 +114,9 @@ function renderRow(label, curr, d1, d5, d10) {
     `;
 }
 
-// 依據「日期 | 買入價格 | 決策訊號 | 日期 | 賣出價格 | 決策訊號」配對格式渲染歷史紀錄
+/**
+ * 時間正序歷史進出場配對 (Trade Pairing Algorithm)
+ */
 function renderHistoryTable(history) {
     const tbody = document.getElementById("historyTableBody");
     if (!tbody) return;
@@ -120,7 +126,7 @@ function renderHistoryTable(history) {
         return;
     }
 
-    // 將歷史每日紀錄反轉為時間正序（由舊到新），以精確進行進出場配對 (Trade Pairing)
+    // 將資料轉為時間正序（舊到新）以進行配對
     const chronologicalHistory = [...history].reverse();
     const tradePairs = [];
     let activeTrade = null;
@@ -131,7 +137,6 @@ function renderHistoryTable(history) {
         const isExit = dec.color === "green" || dec.color === "amber" || item.riskAlert !== "常態監控中";
 
         if (isBuy) {
-            // 觸發買進訊號，建立或更新當前交易對
             if (!activeTrade) {
                 activeTrade = {
                     buyDate: item.date,
@@ -144,7 +149,6 @@ function renderHistoryTable(history) {
                 };
             }
         } else if (isExit && activeTrade) {
-            // 觸發賣出/風控訊號，關閉交易對並存入清單
             activeTrade.sellDate = item.date;
             activeTrade.sellPrice = item.close;
             activeTrade.sellSignal = item.riskAlert !== "常態監控中" ? item.riskAlert : dec.name;
@@ -154,7 +158,6 @@ function renderHistoryTable(history) {
         }
     });
 
-    // 若最後一筆交易對尚未平倉，將其存入顯示清單
     if (activeTrade) {
         tradePairs.push(activeTrade);
     }
@@ -165,7 +168,7 @@ function renderHistoryTable(history) {
         return;
     }
 
-    // 將配對好的交易對倒序（最新交易對顯示於最前）
+    // 倒序呈現（最新交易對在上方）
     const displayPairs = [...tradePairs].reverse();
 
     tbody.innerHTML = displayPairs.map(pair => {
@@ -196,7 +199,23 @@ function renderHistoryTable(history) {
     document.getElementById("historySummary").innerText = `近 6 個月 (120 交易日) 配對結果：成功匹配 ${completedCount} 組完整進出場交易，${holdingCount} 組持股中。`;
 }
 
-// 位階定義文案
+// 知識庫摺疊切換
+function toggleDocSection() {
+    const content = document.getElementById("docContent");
+    const icon = document.getElementById("docToggleIcon");
+    if (content.classList.contains("hidden")) {
+        content.classList.remove("hidden");
+        icon.innerText = "▲ 折疊說明知識庫";
+        if (window.MathJax) {
+            MathJax.typesetPromise();
+        }
+    } else {
+        content.classList.add("hidden");
+        icon.innerText = "▼ 展開說明知識庫";
+    }
+}
+
+// 位階描述文案
 function getSDVLevelDesc(val) {
     if (val >= 70) return "≥70 極致超買/強勢主攻";
     if (val >= 60) return "60~69 多頭強勢/趨勢延伸";
@@ -233,5 +252,5 @@ function getBDVLevelDesc(val) {
     return "<30 極致收縮/Squeeze臨界";
 }
 
-// 頁面載入完成後自動分析預設股票 (2330)
+// 頁面加載完成後自動計算預設股票 2330
 window.onload = () => analyzeStock();

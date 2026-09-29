@@ -1,5 +1,6 @@
 /**
  * QuantDecisionEngine - 對數標準化 (T-Score) 與共振決策矩陣運算引擎
+ * 依據《四指標趨勢分析說明文案》規範進行精確演算
  */
 class QuantDecisionEngine {
     constructor(rawData) {
@@ -7,6 +8,9 @@ class QuantDecisionEngine {
         this.tScores = [];
     }
 
+    /**
+     * 計算衍生指標：真實區間 (TR)、14日 ATR、20日 Bollinger Bandwidth
+     */
     calculateDerivedMetrics() {
         const len = this.rawData.length;
         let trs = [];
@@ -51,6 +55,10 @@ class QuantDecisionEngine {
         }
     }
 
+    /**
+     * 計算 Log Standardized T-Score (SDV, VDV, ADV, BDV)
+     * Window Size: 30 交易日
+     */
     calculateTScores(windowSize = 30) {
         this.calculateDerivedMetrics();
         const len = this.rawData.length;
@@ -93,6 +101,9 @@ class QuantDecisionEngine {
         return this.tScores;
     }
 
+    /**
+     * 取得最新實時分析與決策矩陣狀態
+     */
     getLatestAnalysis() {
         if (this.tScores.length === 0) this.calculateTScores();
         const ts = this.tScores;
@@ -109,6 +120,9 @@ class QuantDecisionEngine {
         };
     }
 
+    /**
+     * 取得歷史決策訊號紀錄 (近 N 交易日)
+     */
     getHistoricalDecisionSignals(tradingDays = 120) {
         if (this.tScores.length === 0) this.calculateTScores();
         const ts = this.tScores;
@@ -139,6 +153,9 @@ class QuantDecisionEngine {
         return historySignals.reverse();
     }
 
+    /**
+     * 計算多週期動能 Δ (Δ1, Δ5, Δ10)
+     */
     computeDelta(t, t_1, t_5, t_10) {
         return {
             SDV_1: t.SDV - t_1.SDV, SDV_5: t.SDV - t_5.SDV, SDV_10: t.SDV - t_10.SDV,
@@ -148,6 +165,9 @@ class QuantDecisionEngine {
         };
     }
 
+    /**
+     * ADV 波動度驅動之動態移動停利停損機制
+     */
     evaluateADVRiskControl(t, delta) {
         let stopLossMode = "", stopLossRule = "", takeProfitAlert = "常態監控中", action = "HOLD";
 
@@ -173,6 +193,9 @@ class QuantDecisionEngine {
         return { stopLossMode, stopLossRule, takeProfitAlert, action };
     }
 
+    /**
+     * 四層邏輯架構之決策矩陣對齊 (買進與平倉訊號矩陣)
+     */
     matchDecisionMatrix(t, d, tsHistory, currentIndex) {
         const { SDV, VDV, ADV, BDV } = t;
         const prevT1 = currentIndex > 0 ? tsHistory[currentIndex - 1] : null;
@@ -196,7 +219,7 @@ class QuantDecisionEngine {
         // 3. 假跌破掃蕩 (買進)
         const brokeUnder50AndRecovered = prevT1 && prevT1.SDV < 50 && SDV >= 50;
         if (ADV >= 50 && ADV <= 60 && BDV < 50 && brokeUnder50AndRecovered && (VDV < 40 || VDV >= 60) &&
-            d.SDV_10 >= 0 && d.VDV_10 >= 0 && d.BDV_10 <= 0 &&
+            d.SDV_10 >= 0 && d.VDV_10 >= 0 && d.ADV_10 >= -3 && d.ADV_10 <= 3 && d.BDV_10 <= 0 &&
             d.SDV_5 <= -3 && d.VDV_5 <= -3 && d.ADV_5 >= 3 && d.BDV_5 <= 0 &&
             d.SDV_1 >= 10 && d.VDV_1 >= 3 && d.ADV_1 > 0 && d.BDV_1 >= 3) {
             return { action: "BUY_BEAR_TRAP", name: "假跌破掃蕩", signal: "買進 (掃蕩)", color: "red", desc: "誘空洗盤結束，爆發長陽吞噬並強勢收復多空中軸。" };

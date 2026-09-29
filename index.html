@@ -6,6 +6,16 @@
     <title>台股實時四指標與歷史系統決策矩陣</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- MathJax 支援數式渲染 -->
+    <script>
+        MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']]
+            }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen p-4 md:p-8">
 
@@ -89,7 +99,7 @@
         <div class="bg-slate-800/90 p-6 rounded-xl border border-sky-500/30 shadow-xl space-y-4">
             <div class="flex items-center justify-between border-b border-slate-700 pb-3">
                 <h3 class="text-lg font-bold text-sky-400 flex items-center gap-2">
-                    🛡️ ADV 波動度驅動之動態移動風控樞紐 (Trailing Risk Control)
+                    🛡️️ ADV 波動度驅動之動態移動風控樞紐 (Trailing Risk Control)
                 </h3>
                 <span class="text-xs px-2.5 py-1 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/20">適應型移動風控</span>
             </div>
@@ -161,6 +171,57 @@
                         <tr><td colspan="6" class="p-4 text-slate-500">點擊「實時分析」進行動態計算...</td></tr>
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <!-- 整合知識庫：四指標趨勢分析說明文案與速查矩陣 -->
+        <div class="bg-slate-800/80 p-6 rounded-xl border border-slate-700 shadow-lg space-y-4">
+            <div class="flex justify-between items-center cursor-pointer" onclick="toggleDocSection()">
+                <h3 class="text-lg font-bold text-sky-300 flex items-center gap-2">
+                    📚 四指標趨勢分析說明文案與決策矩陣速查知識庫
+                </h3>
+                <span id="docToggleIcon" class="text-sm font-semibold text-sky-400 hover:text-sky-300">
+                    ▼ 展開說明知識庫
+                </span>
+            </div>
+
+            <div id="docContent" class="hidden pt-4 space-y-6 text-slate-300 text-sm border-t border-slate-700">
+                
+                <!-- 公式與核心觀念 -->
+                <div class="bg-slate-900/60 p-4 rounded-lg space-y-3">
+                    <h4 class="font-bold text-sky-400">一、標準化對數 T-Score 公式</h4>
+                    <p class="text-xs text-slate-400">系統將四指標透過對數化與統計標準化，轉換為 0 ~ 100 區間之 T-Score 分數：</p>
+                    <div class="overflow-x-auto font-mono text-center text-emerald-300 py-2">
+                        $$T\text{-Score} = 10 \times \left(\frac{\ln(x) - \mu_{\ln(x)}}{\sigma_{\ln(x)}}\right) + 50$$
+                    </div>
+                </div>
+
+                <!-- 核心速查表 -->
+                <div>
+                    <h4 class="font-bold text-amber-400 mb-2">二、核心指標位階速查矩陣</h4>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-center border-collapse text-xs">
+                            <thead>
+                                <tr class="bg-slate-900 text-slate-300 border-b border-slate-700">
+                                    <th class="p-2">區間</th>
+                                    <th class="p-2">SDV (價格位階)</th>
+                                    <th class="p-2">VDV (資金強度)</th>
+                                    <th class="p-2">ADV (風險環境)</th>
+                                    <th class="p-2">BDV (週期張力)</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-700/50">
+                                <tr><td class="p-2 font-bold">≥ 70</td><td>極致超買/強勢主攻</td><td>極致爆量/天量換手</td><td>極致劇烈/高風險暴甩</td><td>極致擴張/張裂頂點</td></tr>
+                                <tr><td class="p-2 font-bold">60~69</td><td>多頭強勢/趨勢延伸</td><td>顯著放量/資金積極</td><td>波動擴大/風險升溫</td><td>通道擴張/主升(跌)段</td></tr>
+                                <tr><td class="p-2 font-bold">50~59</td><td>中性偏多/溫和控盤</td><td>常態量能/資金中性</td><td>中度波動/風險適性</td><td>中軸運作/態勢緩和</td></tr>
+                                <tr><td class="p-2 font-bold">40~49</td><td>中性偏空/溫和控盤</td><td>量能微縮/資金觀望</td><td>波動收斂/風險偏低</td><td>通道收縮/區間盤整</td></tr>
+                                <tr><td class="p-2 font-bold">30~39</td><td>空頭強勢/趨勢下尋</td><td>低迷量能/顯著縮量</td><td>低度波動/市場沉寂</td><td>高度擠壓/變盤蓄勢</td></tr>
+                                <tr><td class="p-2 font-bold">< 30</td><td>極致超賣/恐慌主跌</td><td>極致窒息量/量能冰點</td><td>極致平靜/波動死寂</td><td>極致收縮/Squeeze臨界</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
             </div>
         </div>
 
