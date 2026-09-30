@@ -1,277 +1,231 @@
 /**
- * main.js - 畫面渲染與 GAS API 控制層
+ * Main.js - DOM 視覺化 UI 渲染與事件控制中心
  */
-const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx5h2Ncq111yq3k6tFffiOS9m0vOBtVywbsVdfZPCHvNbSv0vIGYiC_MimgkZGV3gbP/exec";
-const engine = new QuantEngine();
 
 document.addEventListener('DOMContentLoaded', () => {
-  analyzeStock();
+    // 綁定鍵盤 Enter 事件
+    const stockInput = document.getElementById('stockInput');
+    if (stockInput) {
+        stockInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                analyzeStock();
+            }
+        });
+    }
+
+    // 初始化載入預設股票 2330
+    analyzeStock();
 });
 
+/**
+ * 主要分析呼叫入口
+ */
 async function analyzeStock() {
-  const elStockInput = document.getElementById('stockInput');
-  const elDesc = document.getElementById('decisionDesc');
-  const stockCode = elStockInput ? elStockInput.value.trim() || '2330' : '2330';
+    const inputEl = document.getElementById('stockInput');
+    const stockCode = inputEl ? inputEl.value.trim() : '2330';
+    if (!stockCode) return;
 
-  if (elDesc) {
-    elDesc.textContent = `⏳ 正連線 GAS API 抓取 [${stockCode}] 行情數據中...`;
-    elDesc.className = 'text-sm text-amber-400 font-medium animate-pulse mt-3 leading-relaxed';
-  }
+    // 更新 UI 狀態為載入中
+    setLoadingState(true);
 
-  try {
-    const requestUrl = `${GAS_API_URL}?stock=${encodeURIComponent(stockCode)}`;
-    const response = await fetch(requestUrl, { method: 'GET', redirect: 'follow' });
+    try {
+        const result = await window.quantEngine.fetchStockData(stockCode);
+        renderDashboard(result);
+    } catch (err) {
+        console.error("即時分析出錯:", err);
+        alert("資料讀取失敗，請重新嘗試或確認網路連線。");
+    } finally {
+        setLoadingState(false);
+    }
+}
 
-    if (!response.ok) throw new Error(`HTTP 錯誤碼: ${response.status}`);
+/**
+ * 畫面面板資料繪製
+ */
+function renderDashboard(data) {
+    const { stockCode, stockName, latest, historicalTrades } = data;
+    const { close, prevClose, volume, prevVolume, sdv, vdv, adv, bdv, deltas, decision } = latest;
 
-    const rawResult = await response.json();
-    if (rawResult.status === 'error') throw new Error(rawResult.message || 'GAS 後端執行失敗');
-
-    const stockName = rawResult.stockName || stockCode;
-    const rawCandles = rawResult.data || rawResult.candles || rawResult;
-
-    if (!Array.isArray(rawCandles) || rawCandles.length === 0) {
-      throw new Error(`查無股票代碼 [${stockCode}] 之有效 K 線數據`);
+    // 1. 股票標題與簡介
+    const stockTitle = document.getElementById('stockTitle');
+    if (stockTitle) {
+        stockTitle.innerHTML = `
+            <span class="text-2xl font-extrabold text-white">${stockCode}</span>
+            <span class="text-sm text-slate-300 font-normal mt-1">${stockName}</span>
+        `;
     }
 
-    const candles = normalizeCandleData(rawCandles);
-    const processedCandles = engine.calculateIndicators(candles);
-    const backtestResult = engine.runFullCompoundBacktest(candles, 100000);
+    const decisionDesc = document.getElementById('decisionDesc');
+    if (decisionDesc) decisionDesc.innerText = decision.desc;
 
-    renderHeaderAndStockInfo(stockCode, stockName, processedCandles);
-    renderSignalBadge(processedCandles);
-    renderTScoreCards(processedCandles);
-    renderAdvRiskHub(processedCandles);
-    renderDeltaMatrix(processedCandles);
-    renderHistoryTable(backtestResult.tradeHistory);
-
-  } catch (error) {
-    console.error('API Fetch/Analysis Error:', error);
-    if (elDesc) {
-      elDesc.textContent = `❌ 連線/處理失敗：${error.message}`;
-      elDesc.className = 'text-sm text-rose-400 font-semibold mt-3 leading-relaxed';
+    // 2. 股價與成交量
+    const priceDiff = close - prevClose;
+    const priceColor = priceDiff >= 0 ? 'text-emerald-400' : 'text-rose-400';
+    const priceSign = priceDiff > 0 ? '+' : '';
+    const stockPrice = document.getElementById('stockPrice');
+    if (stockPrice) {
+        stockPrice.className = `text-2xl md:text-3xl font-extrabold font-mono ${priceColor}`;
+        stockPrice.innerText = `NT$ ${close.toFixed(1)} (${priceSign}${priceDiff.toFixed(1)})`;
     }
-  }
-}
 
-function normalizeCandleData(data) {
-  return data.map(item => ({
-    date: item.date || item.Date || item.time || '',
-    open: parseFloat(item.open || item.Open || item.close || 0),
-    high: parseFloat(item.high || item.High || item.close || 0),
-    low: parseFloat(item.low || item.Low || item.close || 0),
-    close: parseFloat(item.close || item.Close || 0),
-    volume: parseFloat(item.volume || item.Volume || item.vol || 0)
-  })).filter(c => c.close > 0 && c.date !== '');
-}
-
-function renderHeaderAndStockInfo(code, name, candles) {
-  const last = candles[candles.length - 1];
-  const prev = candles[candles.length - 2] || last;
-  const priceDiff = last.close - prev.close;
-  const pricePct = ((priceDiff / prev.close) * 100).toFixed(2);
-  const isUp = priceDiff >= 0;
-
-  const elTitle = document.getElementById('stockTitle');
-  if (elTitle) {
-    elTitle.innerHTML = `
-      <span class="text-2xl font-extrabold text-white">${code} ${name}</span>
-      <span class="text-sm text-slate-300 font-normal mt-1">最新數據日期：${last.date}</span>
-    `;
-  }
-
-  const elPrice = document.getElementById('stockPrice');
-  if (elPrice) {
-    elPrice.className = `text-2xl md:text-3xl font-extrabold font-mono ${isUp ? 'text-rose-400' : 'text-emerald-400'}`;
-    elPrice.textContent = `NT$ ${last.close.toFixed(2)} (${isUp ? '+' : ''}${pricePct}%)`;
-  }
-
-  const elVolume = document.getElementById('stockVolume');
-  if (elVolume) {
-    const volInLots = Math.round(last.volume / 1000);
-    elVolume.textContent = `${volInLots.toLocaleString()} 張`;
-  }
-}
-
-function renderSignalBadge(candles) {
-  const last = candles[candles.length - 1];
-  const prev = candles[candles.length - 2] || last;
-  const decision = engine.evaluateEntrySignal(last, prev);
-
-  const elBadge = document.getElementById('signalBadge');
-  const elDesc = document.getElementById('decisionDesc');
-
-  if (elBadge) {
-    if (decision.isFullPosition) {
-      elBadge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-center";
-      elBadge.textContent = `🚀 ${decision.signal} (${decision.score}分)`;
-    } else if (decision.canEnter) {
-      elBadge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-sky-500/20 text-sky-400 border border-sky-500/40 text-center";
-      elBadge.textContent = `📈 ${decision.signal} (${decision.score}分)`;
-    } else if (decision.isOverheated) {
-      elBadge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-amber-500/20 text-amber-400 border border-amber-500/40 text-center";
-      elBadge.textContent = `⚠️ 高位吹哨警示 (${decision.score}分)`;
-    } else {
-      elBadge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-slate-700 text-slate-300 text-center";
-      elBadge.textContent = `💤 觀望待變 (${decision.score}分)`;
+    const stockVolume = document.getElementById('stockVolume');
+    if (stockVolume) {
+        stockVolume.innerText = `${Math.round(volume / 1000).toLocaleString()} 張`;
     }
-  }
 
-  if (elDesc) {
-    elDesc.className = "text-sm text-slate-300 mt-3 leading-relaxed";
-    elDesc.textContent = decision.isOverheated 
-      ? `目前 SDV (${Math.round(last.sdv)}) 與 ADV (${Math.round(last.adv)}) 同步過熱，觸發高位吹哨避險機制，禁止重倉追高。`
-      : `系統評分 ${decision.score} 分。當前量價共振結構${decision.canEnter ? '良好，符合進場條件' : '尚未達到標準門檻'}。`;
-  }
-}
-
-function renderTScoreCards(candles) {
-  const last = candles[candles.length - 1];
-  const updateCard = (valId, statusId, value, highLimit, lowLimit) => {
-    const elVal = document.getElementById(valId);
-    const elStatus = document.getElementById(statusId);
-    if (!elVal || !elStatus) return;
-
-    const roundVal = Math.round(value);
-    elVal.textContent = roundVal;
-
-    if (roundVal >= highLimit) {
-      elVal.className = "text-4xl font-extrabold font-mono text-amber-400";
-      elStatus.textContent = "高位強勢 / 過熱警戒";
-      elStatus.className = "text-xs mt-2 text-amber-400 font-semibold";
-    } else if (roundVal <= lowLimit) {
-      elVal.className = "text-4xl font-extrabold font-mono text-slate-500";
-      elStatus.textContent = "低位沉悶 / 無顯著動能";
-      elStatus.className = "text-xs mt-2 text-slate-400";
-    } else {
-      elVal.className = "text-4xl font-extrabold font-mono text-white";
-      elStatus.textContent = "常態區間運作";
-      elStatus.className = "text-xs mt-2 text-slate-400";
+    // 3. 系統決策訊號徽章
+    const signalBadge = document.getElementById('signalBadge');
+    if (signalBadge) {
+        signalBadge.className = `inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm text-center ${decision.badgeClass}`;
+        signalBadge.innerText = `${decision.badge} (${decision.position} 倉位)`;
     }
-  };
 
-  updateCard('sdvValue', 'sdvStatus', last.sdv, 65, 35);
-  updateCard('vdvValue', 'vdvStatus', last.vdv, 60, 30);
-  updateCard('advValue', 'advStatus', last.adv, 60, 30);
-  updateCard('bdvValue', 'bdvStatus', last.bdv, 65, 35);
-}
+    // 4. 四指標 T-Score 現況
+    renderIndicatorBox('sdvValue', 'sdvStatus', sdv, 'SDV');
+    renderIndicatorBox('vdvValue', 'vdvStatus', vdv, 'VDV');
+    renderIndicatorBox('advValue', 'advStatus', adv, 'ADV');
+    renderIndicatorBox('bdvValue', 'bdvStatus', bdv, 'BDV');
 
-function renderAdvRiskHub(candles) {
-  const last = candles[candles.length - 1];
-  const prev = candles[candles.length - 2] || last;
-  const modeEl = document.getElementById('advStopLossMode');
-  const ruleEl = document.getElementById('advStopLossRule');
-  const alertEl = document.getElementById('advTakeProfitAlert');
+    // 5. ADV 風控樞紐
+    const riskControl = window.quantEngine.getRiskControlStatus(latest);
+    const advStopLossMode = document.getElementById('advStopLossMode');
+    if (advStopLossMode) advStopLossMode.innerText = riskControl.stopLossMode;
 
-  const atrStopVal = (last.close - (last.atr14 * QuantConfig.ATR_TRAILING_MULT)).toFixed(2);
+    const advStopLossRule = document.getElementById('advStopLossRule');
+    if (advStopLossRule) advStopLossRule.innerText = riskControl.stopLossRule;
 
-  if (modeEl && ruleEl) {
-    if (last.adv >= 60) {
-      modeEl.textContent = `高波動擴張模式 (ADV: ${Math.round(last.adv)})`;
-      modeEl.className = "text-sm font-bold text-amber-400";
-      ruleEl.textContent = `當前放大通道防護。動態停利參考價約 NT$ ${atrStopVal} (退守 1.8x ATR)`;
-    } else {
-      modeEl.textContent = `標準收斂風控模式 (ADV: ${Math.round(last.adv)})`;
-      modeEl.className = "text-sm font-bold text-sky-400";
-      ruleEl.textContent = `遵循標準 4% 硬停損線與 1.8x ATR 移動停利軌道。`;
+    const advTakeProfitAlert = document.getElementById('advTakeProfitAlert');
+    if (advTakeProfitAlert) {
+        advTakeProfitAlert.innerText = riskControl.takeProfitDesc;
+        advTakeProfitAlert.className = riskControl.isTakeProfitTriggered 
+            ? "text-sm font-bold text-rose-400 animate-pulse"
+            : "text-sm font-semibold text-emerald-400";
     }
-  }
 
-  if (alertEl) {
-    const delta1Adv = last.adv - prev.adv;
-    if (last.sdv >= 65 && last.adv >= 70 && delta1Adv <= -3.0) {
-      alertEl.textContent = "🚨 觸發情緒爆發拐點！建議移動停利落袋";
-      alertEl.className = "text-sm font-bold text-rose-400 animate-pulse";
-    } else {
-      alertEl.textContent = "常態監控中";
-      alertEl.className = "text-sm font-semibold text-emerald-400";
+    // 6. Δ 動能矩陣表格
+    renderDeltaMatrix(sdv, vdv, adv, bdv, deltas);
+
+    // 7. 近 6 個月歷史決策紀錄
+    renderHistoryTable(historicalTrades);
+}
+
+/**
+ * 渲染單一指標卡片
+ */
+function renderIndicatorBox(valueId, statusId, value, type) {
+    const valEl = document.getElementById(valueId);
+    const statEl = document.getElementById(statusId);
+    if (!valEl || !statEl) return;
+
+    valEl.innerText = value.toFixed(1);
+
+    let statusText = "";
+    let statusColor = "text-slate-400";
+
+    if (type === 'SDV') {
+        if (value >= 60) { statusText = "極致多頭位階"; statusColor = "text-emerald-400"; }
+        else if (value >= 50) { statusText = "偏多震盪區間"; statusColor = "text-sky-400"; }
+        else { statusText = "空頭弱勢區間"; statusColor = "text-rose-400"; }
+    } else if (type === 'VDV') {
+        if (value >= 60) { statusText = "資金顯著流入"; statusColor = "text-emerald-400"; }
+        else if (value >= 50) { statusText = "量能平穩"; statusColor = "text-sky-400"; }
+        else { statusText = "量能急凍萎縮"; statusColor = "text-rose-400"; }
+    } else if (type === 'ADV') {
+        if (value >= 65) { statusText = "高波動劇烈區"; statusColor = "text-amber-400"; }
+        else if (value >= 45) { statusText = "常態波動環境"; statusColor = "text-slate-300"; }
+        else { statusText = "極致壓縮低波"; statusColor = "text-sky-400"; }
+    } else if (type === 'BDV') {
+        if (value >= 60) { statusText = "通道全面擴張"; statusColor = "text-emerald-400"; }
+        else { statusText = "通道平行壓縮"; statusColor = "text-slate-400"; }
     }
-  }
+
+    statEl.innerText = statusText;
+    statEl.className = `text-xs mt-2 ${statusColor}`;
 }
 
-function renderDeltaMatrix(candles) {
-  const tbody = document.getElementById('deltaMatrixBody');
-  if (!tbody) return;
+/**
+ * 繪製 Δ 多週期動能矩陣表
+ */
+function renderDeltaMatrix(sdv, vdv, adv, bdv, deltas) {
+    const tbody = document.getElementById('deltaMatrixBody');
+    if (!tbody) return;
 
-  const len = candles.length;
-  const last = candles[len - 1];
-  const c1 = candles[len - 2] || last;
-  const c5 = candles[len - 6] || last;
-  const c10 = candles[len - 11] || last;
+    const items = [
+        { name: '價格位階 (SDV)', score: sdv, delta: deltas.sdv },
+        { name: '資金強度 (VDV)', score: vdv, delta: deltas.vdv },
+        { name: '風險環境 (ADV)', score: adv, delta: deltas.adv },
+        { name: '週期張力 (BDV)', score: bdv, delta: deltas.bdv }
+    ];
 
-  const indicators = [
-    { name: '價格位階 (SDV)', key: 'sdv' },
-    { name: '資金強度 (VDV)', key: 'vdv' },
-    { name: '風險環境 (ADV)', key: 'adv' },
-    { name: '週期張力 (BDV)', key: 'bdv' }
-  ];
-
-  const formatDelta = (val) => {
-    const round = val.toFixed(1);
-    if (val > 0) return `<span class="text-rose-400 font-bold">+${round}</span>`;
-    if (val < 0) return `<span class="text-emerald-400 font-bold">${round}</span>`;
-    return `<span class="text-slate-400">${round}</span>`;
-  };
-
-  tbody.innerHTML = indicators.map(ind => {
-    const current = last[ind.key];
-    const d1 = current - c1[ind.key];
-    const d5 = current - c5[ind.key];
-    const d10 = current - c10[ind.key];
-
-    return `
-      <tr class="hover:bg-slate-800/50 transition border-b border-slate-700/30">
-        <td class="p-3 text-left font-sans text-slate-200">${ind.name}</td>
-        <td class="p-3 text-white font-bold">${Math.round(current)}</td>
-        <td class="p-3">${formatDelta(d1)}</td>
-        <td class="p-3">${formatDelta(d5)}</td>
-        <td class="p-3">${formatDelta(d10)}</td>
-      </tr>
-    `;
-  }).join('');
+    tbody.innerHTML = items.map(item => `
+        <tr class="hover:bg-slate-700/30 transition">
+            <td class="p-3 text-left font-sans text-slate-300 font-semibold">${item.name}</td>
+            <td class="p-3 font-bold text-white">${item.score.toFixed(1)}</td>
+            <td class="p-3 ${getDeltaColor(item.delta.d1)}">${formatDelta(item.delta.d1)}</td>
+            <td class="p-3 ${getDeltaColor(item.delta.d5)}">${formatDelta(item.delta.d5)}</td>
+            <td class="p-3 ${getDeltaColor(item.delta.d10)}">${formatDelta(item.delta.d10)}</td>
+        </tr>
+    `).join('');
 }
 
+function formatDelta(val) {
+    return (val > 0 ? `+${val.toFixed(1)}` : val.toFixed(1));
+}
+
+function getDeltaColor(val) {
+    if (val > 0) return 'text-emerald-400 font-bold';
+    if (val < 0) return 'text-rose-400 font-bold';
+    return 'text-slate-400';
+}
+
+/**
+ * 繪製歷史買賣成對對沖紀錄表
+ */
 function renderHistoryTable(trades) {
-  const tbody = document.getElementById('historyTableBody');
-  const summaryEl = document.getElementById('historySummary');
-  if (!tbody) return;
+    const tbody = document.getElementById('historyTableBody');
+    const summary = document.getElementById('historySummary');
+    if (!tbody) return;
 
-  tbody.innerHTML = '';
+    if (!trades || trades.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="p-4 text-slate-500 text-center font-sans">近 120 交易日內無觸發買賣成對訊號</td></tr>`;
+        if (summary) summary.innerText = '近 6 個月分析完成：無歷史交易觸發';
+        return;
+    }
 
-  if (!trades || trades.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-slate-500 text-center font-sans">近 120 交易日內無符合之進場訊號</td></tr>`;
-    if (summaryEl) summaryEl.textContent = '近 120 交易日無觸發紀錄';
-    return;
-  }
+    if (summary) {
+        summary.innerText = `近 6 個月 (120 交易日) 共擷取 ${trades.length} 筆歷史系統進出場循環`;
+    }
 
-  if (summaryEl) {
-    const wins = trades.filter(t => t.pnlPct > 0).length;
-    const winRate = Math.round((wins / trades.length) * 100);
-    summaryEl.textContent = `共觸發 ${trades.length} 次交易 | 勝率 ${winRate}% (${wins}勝 / ${trades.length - wins}敗)`;
-  }
+    tbody.innerHTML = trades.map(t => `
+        <tr class="hover:bg-slate-700/40 border-b border-slate-700/30">
+            <td class="p-3 text-slate-300">${t.buyDate}</td>
+            <td class="p-3 font-bold text-emerald-400">NT$ ${t.buyPrice.toFixed(1)}</td>
+            <td class="p-3 border-r border-slate-700">
+                <span class="px-2 py-0.5 text-xs rounded bg-emerald-950 text-emerald-300 border border-emerald-500/30 font-sans">${t.buySignal}</span>
+            </td>
+            <td class="p-3 text-slate-300">${t.sellDate}</td>
+            <td class="p-3 font-bold text-rose-400">NT$ ${t.sellPrice.toFixed(1)}</td>
+            <td class="p-3">
+                <span class="px-2 py-0.5 text-xs rounded bg-slate-700 text-slate-300 font-sans">${t.sellSignal}</span>
+            </td>
+        </tr>
+    `).join('');
+}
 
-  trades.forEach(t => {
-    const row = document.createElement('tr');
-    row.className = 'border-b border-slate-700/40 hover:bg-slate-800/60 transition';
-
-    const isProfit = t.pnlPct > 0;
-    const pnlBadge = `<span class="text-xs px-2 py-0.5 rounded ${isProfit ? 'bg-emerald-950 text-emerald-400 border border-emerald-700/50' : 'bg-rose-950 text-rose-400 border border-rose-700/50'}">
-      ${isProfit ? '+' : ''}${t.pnlPct}%
-    </span>`;
-
-    row.innerHTML = `
-      <td class="p-3 text-slate-300">${t.buyDate}</td>
-      <td class="p-3 text-slate-200">NT$ ${t.buyPrice.toFixed(2)}</td>
-      <td class="p-3 text-sky-400 font-medium border-r border-slate-700/60">${t.buySignal}</td>
-      <td class="p-3 text-slate-300">${t.sellDate}</td>
-      <td class="p-3 text-slate-200">NT$ ${t.sellPrice.toFixed(2)}</td>
-      <td class="p-3">
-        <div class="flex items-center justify-center gap-2">
-          ${pnlBadge}
-          <span class="text-xs text-slate-400">${t.sellReason}</span>
-        </div>
-      </td>
-    `;
-    tbody.appendChild(row);
-  });
+/**
+ * 切換按鈕載入狀態
+ */
+function setLoadingState(isLoading) {
+    const btn = document.querySelector('button[onclick="analyzeStock()"]');
+    if (!btn) return;
+    
+    if (isLoading) {
+        btn.disabled = true;
+        btn.innerText = '運算中...';
+        btn.classList.add('opacity-50', 'cursor-not-allowed');
+    } else {
+        btn.disabled = false;
+        btn.innerText = '實時分析';
+        btn.classList.remove('opacity-50', 'cursor-not-allowed');
+    }
 }
