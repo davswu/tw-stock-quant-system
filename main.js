@@ -1,27 +1,102 @@
 /**
- * main.js - 前端畫面渲染與 UI 控制層
- * 版本：v3.2 High-Compound UI Controller
+ * main.js - 實時 GAS API 連線與 v3.2 全額複利控制層
  */
+
+// GAS API 資料服務端點
+const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzk4k29HgzQx3AVVTA77ZaCzRevPyKdtvz56J_P-URJFHLZIaOt3zU8XT4UVAlfGait/exec";
 
 document.addEventListener('DOMContentLoaded', () => {
   const engine = new QuantEngine();
 
-  // 頁面 DOM 節點繫結
+  // 畫面 DOM 節點繫結
   const elCapital = document.getElementById('totalCapital');
   const elReturn = document.getElementById('totalReturn');
   const elWinRate = document.getElementById('winRate');
   const elTradeTable = document.getElementById('tradeHistoryBody');
   const elCurrentSignal = document.getElementById('currentSignalCard');
+  const elStatus = document.getElementById('statusMessage') || document.getElementById('apiStatus');
   const btnRunBacktest = document.getElementById('btnRunBacktest');
 
   /**
-   * 執行回測並更新介面
+   * 1. 從 GAS API 抓取歷史與即時數據並驅動運算
    */
-  function updateDashboard() {
-    const marketData = getLatestMarketData();
-    const result = engine.runFullCompoundBacktest(marketData, 100000);
+  async function fetchAndRenderDashboard() {
+    if (elStatus) {
+      elStatus.textContent = '⏳ 連線 GAS API 中...';
+      elStatus.className = 'text-amber-400 font-medium animate-pulse text-xs';
+    }
 
-    // 1. 頂部資產與勝率總覽
+    try {
+      // 發起非同步請求
+      const response = await fetch(GAS_API_URL, {
+        method: 'GET',
+        redirect: 'follow'
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP 錯誤碼: ${response.status}`);
+      }
+
+      const rawResult = await response.json();
+
+      // 相容性解析：支援直接回傳陣列或包裝在 { data: [...] } / { candles: [...] } 內的格式
+      let candles = [];
+      if (Array.isArray(rawResult)) {
+        candles = rawResult;
+      } else if (rawResult && rawResult.data && Array.isArray(rawResult.data)) {
+        candles = rawResult.data;
+      } else if (rawResult && rawResult.candles && Array.isArray(rawResult.candles)) {
+        candles = rawResult.candles;
+      } else {
+        throw new Error('GAS 回傳格式不正確，未找到 K 線陣列');
+      }
+
+      if (candles.length === 0) {
+        throw new Error('GAS 資料庫回傳空資料');
+      }
+
+      // 標準化欄位轉碼 (防止 GAS 回傳字串型數字或大小寫差異)
+      const formattedCandles = normalizeCandleData(candles);
+
+      // 帶入重構後的 v3.2 全額複利滾動引擎執行回測
+      const backtestResult = engine.runFullCompoundBacktest(formattedCandles, 100000);
+
+      // 更新全頁面 UI
+      updateDashboardUI(backtestResult, formattedCandles);
+
+      if (elStatus) {
+        elStatus.textContent = `🟢 GAS API 同步成功 (共 ${formattedCandles.length} 筆資料)`;
+        elStatus.className = 'text-emerald-400 font-medium text-xs';
+      }
+
+    } catch (error) {
+      console.error('GAS API Fetch Error:', error);
+      if (elStatus) {
+        elStatus.textContent = `❌ 連線失敗：${error.message}`;
+        elStatus.className = 'text-rose-400 font-semibold text-xs';
+      }
+    }
+  }
+
+  /**
+   * 2. 資料清洗與類型轉換 (防呆機制)
+   */
+  function normalizeCandleData(data) {
+    return data.map(item => ({
+      date: item.date || item.Date || item.time || '',
+      open: parseFloat(item.open || item.Open || item.close || 0),
+      high: parseFloat(item.high || item.High || item.close || 0),
+      low: parseFloat(item.low || item.Low || item.close || 0),
+      close: parseFloat(item.close || item.Close || 0),
+      volume: parseFloat(item.volume || item.Volume || item.vol || 0)
+    })).filter(c => c.close > 0 && c.date !== '');
+  }
+
+  /**
+   * 3. 畫面元件更新
+   */
+  function updateDashboardUI(result, candles) {
+    // A. 頂部資產與勝率總覽
     if (elCapital) elCapital.textContent = `NT$ ${result.finalCapital.toLocaleString()}`;
     if (elReturn) {
       const prefix = result.totalReturnPct >= 0 ? '+' : '';
@@ -35,22 +110,22 @@ document.addEventListener('DOMContentLoaded', () => {
       elWinRate.textContent = `${winRatePct}% (${result.winCount}勝 / ${result.lossCount}敗)`;
     }
 
-    // 2. 歷史交易表格（含正確平倉分類）
+    // B. 渲染交易歷史表格
     renderTradeHistoryTable(result.tradeHistory);
 
-    // 3. 最新即時決策卡片
-    renderCurrentSignalCard(marketData);
+    // C. 渲染當前盤後訊號卡片
+    renderCurrentSignalCard(candles);
   }
 
   /**
-   * 渲染歷史交易明細（徹底修復虧損誤標為移動停利的問題）
+   * 4. 歷史交易紀錄表格
    */
   function renderTradeHistoryTable(trades) {
     if (!elTradeTable) return;
     elTradeTable.innerHTML = '';
 
     if (!trades || trades.length === 0) {
-      elTradeTable.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-gray-500">當前門檻過濾下無交易紀錄</td></tr>`;
+      elTradeTable.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-gray-500">當前條件過濾下無符合之進場交易</td></tr>`;
       return;
     }
 
@@ -62,7 +137,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const pnlClass = isProfit ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold';
       const pnlFormatted = `${isProfit ? '+' : ''}${t.pnlPct}%`;
 
-      // 根據 sellType 給予正確的標籤視覺顏色
       let reasonStyle = 'bg-gray-800 text-gray-300 border-gray-700';
       if (t.sellType === 'ATR_TAKE_PROFIT') {
         reasonStyle = 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60';
@@ -87,7 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /**
-   * 渲染最新盤後訊號卡片
+   * 5. 即時訊號卡片
    */
   function renderCurrentSignalCard(candles) {
     if (!elCurrentSignal) return;
@@ -107,7 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
     elCurrentSignal.className = `p-5 rounded-xl border ${borderClass} shadow-xl transition-all`;
     elCurrentSignal.innerHTML = `
       <div class="flex items-center justify-between mb-2">
-        <span class="text-xs font-semibold text-gray-400 uppercase tracking-wider">即時訊號決策 (日期: ${last.date})</span>
+        <span class="text-xs font-semibold text-gray-400 uppercase tracking-wider">即時訊號決策 (最新數據: ${last.date})</span>
         <span class="text-2xl font-black ${decision.isFullPosition ? 'text-emerald-400' : 'text-gray-200'}">${decision.score} 分</span>
       </div>
       <div class="text-xl font-bold text-white mb-3">${decision.signal}</div>
@@ -119,40 +193,16 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
       ${decision.isOverheated ? `
         <div class="mt-3 text-xs text-amber-300 bg-amber-900/40 p-2.5 rounded-lg border border-amber-800/80 flex items-center gap-2">
-          <span>⚠️ <strong>高位吹哨觸發：</strong>當前價量與波幅過熱，系統已自動封鎖 100% 重倉進場。</span>
+          <span>⚠️ <strong>高位吹哨觸發：</strong>價量與離差過熱，系統已自動封鎖 100% 重倉進場。</span>
         </div>
       ` : ''}
     `;
   }
 
   if (btnRunBacktest) {
-    btnRunBacktest.addEventListener('click', updateDashboard);
+    btnRunBacktest.addEventListener('click', fetchAndRenderDashboard);
   }
 
-  // 頁面載入後自動觸發更新
-  updateDashboard();
+  // 頁面初始化：立即連線 GAS 抓取資料
+  fetchAndRenderDashboard();
 });
-
-/**
- * 歷史 K 線與數據載入器 (亦可替換為 GAS fetch 邏輯)
- */
-function getLatestMarketData() {
-  return [
-    { date: '2026-04-15', open: 66.5, high: 67.5, low: 66.0, close: 67.00, volume: 1200 },
-    { date: '2026-04-17', open: 67.2, high: 68.0, low: 66.8, close: 67.30, volume: 1100 },
-    { date: '2026-04-21', open: 73.5, high: 75.0, low: 73.0, close: 74.10, volume: 3500 },
-    { date: '2026-04-23', open: 73.0, high: 73.5, low: 71.5, close: 71.90, volume: 1800 },
-    { date: '2026-05-22', open: 78.5, high: 80.0, low: 78.0, close: 79.10, volume: 4800 },
-    { date: '2026-06-01', open: 104.0, high: 108.0, low: 102.5, close: 106.50, volume: 9200 },
-    { date: '2026-06-18', open: 103.0, high: 105.0, low: 102.0, close: 104.00, volume: 3100 },
-    { date: '2026-06-23', open: 105.5, high: 107.5, low: 104.5, close: 106.50, volume: 2900 },
-    { date: '2026-06-26', open: 96.5, high: 98.0, low: 95.0, close: 97.50, volume: 2200 },
-    { date: '2026-06-29', open: 91.0, high: 92.5, low: 89.5, close: 90.50, volume: 3400 },
-    { date: '2026-07-01', open: 105.5, high: 108.0, low: 105.0, close: 107.00, volume: 4100 },
-    { date: '2026-07-07', open: 108.5, high: 110.0, low: 107.5, close: 109.00, volume: 2600 },
-    { date: '2026-07-13', open: 114.0, high: 116.0, low: 103.5, close: 104.00, volume: 8500 },
-    { date: '2026-07-16', open: 121.0, high: 123.0, low: 109.5, close: 110.50, volume: 9800 },
-    { date: '2026-09-18', open: 93.0, high: 95.0, low: 92.5, close: 94.00, volume: 3800 },
-    { date: '2026-09-29', open: 102.0, high: 105.5, low: 101.5, close: 104.50, volume: 4600 }
-  ];
-}
