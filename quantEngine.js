@@ -1,18 +1,15 @@
 /**
  * quantEngine.js - 核心量化決策與全額複利風控引擎
- * 版本：v3.3 High-Compound Decision Refactored
+ * 版本：v3.2 High-Compound Optimized
  */
-
 const QuantConfig = {
-  MIN_ENTRY_SCORE: 83,         // 建倉試探門檻 (50% 倉位)
-  FULL_POSITION_SCORE: 90,     // 全額複利門檻 (100% 倉位)
-  
-  BLOWOFF_SDV_LIMIT: 65,       // 價格離差過熱警戒值
-  BLOWOFF_ADV_LIMIT: 60,       // 波幅 (ATR) 過熱警戒值
-  
-  ATR_TRAILING_MULT: 1.8,      // 動態 ATR 讓利停利倍數
-  BASE_HARD_STOP_PCT: 0.04,    // 盤中硬停損率 4%
-  GAP_DOWN_STOP_PCT: 0.03      // 隔夜跳空低開停損 3%
+  MIN_ENTRY_SCORE: 83,         // 基本進場門檻
+  FULL_POSITION_SCORE: 90,     // 全額複利投入門檻
+  BLOWOFF_SDV_LIMIT: 65,       // 價格離差過熱值
+  BLOWOFF_ADV_LIMIT: 60,       // 波幅 (ATR) 過熱值
+  ATR_TRAILING_MULT: 1.8,      // 動態 ATR 讓利倍數 (Peak - 1.8 * ATR)
+  BASE_HARD_STOP_PCT: 0.04,    // 基礎硬停損 4%
+  GAP_DOWN_STOP_PCT: 0.03      // 隔夜跳空平倉臨界點 3%
 };
 
 class QuantEngine {
@@ -62,23 +59,20 @@ class QuantEngine {
     let score = (candle.sdv * 0.35) + (candle.vdv * 0.30) + (candle.bdv * 0.20) + (candle.adv * 0.15);
     const overheated = this.isBlowOffOverheated(candle.sdv, candle.adv);
 
-    if (overheated) score -= 20;
+    if (overheated) score -= 20; 
 
     let signal = '無訊號';
-    const isFullPosition = score >= this.config.FULL_POSITION_SCORE && !overheated;
-    const canEnter = score >= this.config.MIN_ENTRY_SCORE && !overheated;
-
-    if (isFullPosition) {
+    if (score >= this.config.FULL_POSITION_SCORE && !overheated) {
       signal = '蓄勢突破 (100% 全額複利)';
-    } else if (canEnter) {
-      signal = '順勢拉回 (建倉試探 50%)';
+    } else if (score >= this.config.MIN_ENTRY_SCORE) {
+      signal = '順勢拉回 (建倉試探)';
     }
 
     return {
       score: Math.round(score),
       signal,
-      canEnter,
-      isFullPosition,
+      canEnter: score >= this.config.MIN_ENTRY_SCORE && !overheated,
+      isFullPosition: score >= this.config.FULL_POSITION_SCORE && !overheated,
       isOverheated: overheated
     };
   }
@@ -87,64 +81,26 @@ class QuantEngine {
     if (!position) return null;
 
     const { entryPrice, highestPrice, trailingStopPrice } = position;
-    const { open, high, low, close, atr14, sdv, adv } = currentCandle;
+    const { open, high, low, close, atr14 } = currentCandle;
 
     const newHighest = Math.max(highestPrice, high);
     const atrStopBand = newHighest - (atr14 * this.config.ATR_TRAILING_MULT);
     const newTrailingStop = Math.max(trailingStopPrice || 0, atrStopBand);
 
-    // 1. 高位情緒爆發拐點出場 (SDV >= 65 & ADV >= 70 & Δ1ADV <= -3.0)
-    const prevAdv = prevCandle ? prevCandle.adv : adv;
-    const delta1Adv = adv - prevAdv;
-    if (sdv >= 65 && adv >= 70 && delta1Adv <= -3.0) {
-      return {
-        shouldExit: true,
-        exitPrice: close,
-        exitReason: '情緒爆發拐點平倉',
-        exitType: 'CLIMAX_TAKE_PROFIT',
-        newHighest,
-        newTrailingStop
-      };
-    }
-
-    // 2. 隔夜跳空防護線
     const isGapDown = (open < prevCandle.close * (1 - this.config.GAP_DOWN_STOP_PCT)) && (open < entryPrice);
     if (isGapDown) {
-      return {
-        shouldExit: true,
-        exitPrice: open,
-        exitReason: '隔夜跳空防護平倉',
-        exitType: 'GAP_DOWN_STOP',
-        newHighest,
-        newTrailingStop
-      };
+      return { shouldExit: true, exitPrice: open, exitReason: '隔夜跳空防護平倉', exitType: 'GAP_DOWN_STOP', newHighest, newTrailingStop };
     }
 
-    // 3. 動態 ATR 讓利移動停利
     if (low <= newTrailingStop && newTrailingStop > entryPrice) {
       const exitP = Math.min(open, newTrailingStop);
-      return {
-        shouldExit: true,
-        exitPrice: Math.max(exitP, low),
-        exitReason: 'ATR動態移動停利',
-        exitType: 'ATR_TAKE_PROFIT',
-        newHighest,
-        newTrailingStop
-      };
+      return { shouldExit: true, exitPrice: Math.max(exitP, low), exitReason: 'ATR動態移動停利', exitType: 'ATR_TAKE_PROFIT', newHighest, newTrailingStop };
     }
 
-    // 4. 基礎硬停損線 (4%)
     const hardStopPrice = entryPrice * (1 - this.config.BASE_HARD_STOP_PCT);
     if (low <= hardStopPrice) {
       const exitP = Math.min(open, hardStopPrice);
-      return {
-        shouldExit: true,
-        exitPrice: Math.max(exitP, hardStopPrice),
-        exitReason: '無效突破硬停損',
-        exitType: 'HARD_STOP',
-        newHighest,
-        newTrailingStop
-      };
+      return { shouldExit: true, exitPrice: Math.max(exitP, low), exitReason: '無效突破硬停損', exitType: 'HARD_STOP', newHighest, newTrailingStop };
     }
 
     return { shouldExit: false, newHighest, newTrailingStop };
@@ -164,12 +120,9 @@ class QuantEngine {
 
       if (position) {
         const exitDecision = this.evaluateExitSignal(position, current, prev);
-
         if (exitDecision.shouldExit) {
           const pnlPct = (exitDecision.exitPrice - position.entryPrice) / position.entryPrice;
-          const tradePnl = position.allocatedCapital * pnlPct;
-          const exitCapital = capital + tradePnl;
-          
+          const exitCapital = capital * (1 + pnlPct);
           tradeHistory.push({
             buyDate: position.entryDate,
             buyPrice: position.entryPrice,
@@ -182,7 +135,6 @@ class QuantEngine {
             startCapital: Math.round(capital),
             endCapital: Math.round(exitCapital)
           });
-
           capital = exitCapital;
           position = null;
         } else {
@@ -191,14 +143,11 @@ class QuantEngine {
         }
       } else {
         const entryDecision = this.evaluateEntrySignal(current, prev);
-        if (entryDecision.canEnter) {
-          const positionRatio = entryDecision.isFullPosition ? 1.0 : 0.5;
+        if (entryDecision.canEnter && entryDecision.isFullPosition) {
           position = {
             entryDate: current.date,
             entryPrice: current.close,
             signalName: entryDecision.signal,
-            positionRatio,
-            allocatedCapital: capital * positionRatio,
             highestPrice: current.high,
             trailingStopPrice: current.close - (current.atr14 * this.config.ATR_TRAILING_MULT)
           };
@@ -207,7 +156,6 @@ class QuantEngine {
     }
 
     const totalReturnPct = ((capital - initialCapital) / initialCapital) * 100;
-
     return {
       initialCapital,
       finalCapital: Math.round(capital),

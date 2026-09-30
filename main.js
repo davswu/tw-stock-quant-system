@@ -1,21 +1,13 @@
 /**
- * main.js - 畫面渲染、動態個股查詢與量化風控控制層
- * 已 100% 適配 index.html 與 quantEngine.js
+ * main.js - 畫面渲染與 GAS API 控制層
  */
-
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx5h2Ncq111yq3k6tFffiOS9m0vOBtVywbsVdfZPCHvNbSv0vIGYiC_MimgkZGV3gbP/exec";
-
-// 初始化量化引擎
 const engine = new QuantEngine();
 
 document.addEventListener('DOMContentLoaded', () => {
-  // 頁面首次載入自動執行預設股票分析 (2330)
   analyzeStock();
 });
 
-/**
- * 主分析進入點 (供 index.html 的 onclick="analyzeStock()" 調用)
- */
 async function analyzeStock() {
   const elStockInput = document.getElementById('stockInput');
   const elDesc = document.getElementById('decisionDesc');
@@ -42,14 +34,10 @@ async function analyzeStock() {
       throw new Error(`查無股票代碼 [${stockCode}] 之有效 K 線數據`);
     }
 
-    // 1. 資料清洗
     const candles = normalizeCandleData(rawCandles);
-
-    // 2. 透過 quantEngine 計算 4 大指標與歷史回測
     const processedCandles = engine.calculateIndicators(candles);
     const backtestResult = engine.runFullCompoundBacktest(candles, 100000);
 
-    // 3. 渲染 index.html 各大區塊
     renderHeaderAndStockInfo(stockCode, stockName, processedCandles);
     renderSignalBadge(processedCandles);
     renderTScoreCards(processedCandles);
@@ -66,9 +54,6 @@ async function analyzeStock() {
   }
 }
 
-/**
- * 資料清洗與轉換
- */
 function normalizeCandleData(data) {
   return data.map(item => ({
     date: item.date || item.Date || item.time || '',
@@ -80,18 +65,13 @@ function normalizeCandleData(data) {
   })).filter(c => c.close > 0 && c.date !== '');
 }
 
-/**
- * 1. 渲染股票名稱、股價與成交量
- */
 function renderHeaderAndStockInfo(code, name, candles) {
   const last = candles[candles.length - 1];
   const prev = candles[candles.length - 2] || last;
-
   const priceDiff = last.close - prev.close;
   const pricePct = ((priceDiff / prev.close) * 100).toFixed(2);
   const isUp = priceDiff >= 0;
 
-  // 股票名稱抬頭
   const elTitle = document.getElementById('stockTitle');
   if (elTitle) {
     elTitle.innerHTML = `
@@ -100,14 +80,12 @@ function renderHeaderAndStockInfo(code, name, candles) {
     `;
   }
 
-  // 即時股價
   const elPrice = document.getElementById('stockPrice');
   if (elPrice) {
     elPrice.className = `text-2xl md:text-3xl font-extrabold font-mono ${isUp ? 'text-rose-400' : 'text-emerald-400'}`;
     elPrice.textContent = `NT$ ${last.close.toFixed(2)} (${isUp ? '+' : ''}${pricePct}%)`;
   }
 
-  // 即時成交量 (單位: 張)
   const elVolume = document.getElementById('stockVolume');
   if (elVolume) {
     const volInLots = Math.round(last.volume / 1000);
@@ -115,9 +93,6 @@ function renderHeaderAndStockInfo(code, name, candles) {
   }
 }
 
-/**
- * 2. 渲染當前系統決策訊號 Badge 與 狀態說明
- */
 function renderSignalBadge(candles) {
   const last = candles[candles.length - 1];
   const prev = candles[candles.length - 2] || last;
@@ -150,12 +125,8 @@ function renderSignalBadge(candles) {
   }
 }
 
-/**
- * 3. 渲染 4 大指標 T-Score 卡片
- */
 function renderTScoreCards(candles) {
   const last = candles[candles.length - 1];
-
   const updateCard = (valId, statusId, value, highLimit, lowLimit) => {
     const elVal = document.getElementById(valId);
     const elStatus = document.getElementById(statusId);
@@ -185,18 +156,13 @@ function renderTScoreCards(candles) {
   updateCard('bdvValue', 'bdvStatus', last.bdv, 65, 35);
 }
 
-/**
- * 4. 渲染 ADV 動態移動風控樞紐
- */
 function renderAdvRiskHub(candles) {
   const last = candles[candles.length - 1];
   const prev = candles[candles.length - 2] || last;
-
   const modeEl = document.getElementById('advStopLossMode');
   const ruleEl = document.getElementById('advStopLossRule');
   const alertEl = document.getElementById('advTakeProfitAlert');
 
-  // 計算動態 ATR 停損點位 (估算)
   const atrStopVal = (last.close - (last.atr14 * QuantConfig.ATR_TRAILING_MULT)).toFixed(2);
 
   if (modeEl && ruleEl) {
@@ -223,9 +189,6 @@ function renderAdvRiskHub(candles) {
   }
 }
 
-/**
- * 5. 渲染多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)
- */
 function renderDeltaMatrix(candles) {
   const tbody = document.getElementById('deltaMatrixBody');
   if (!tbody) return;
@@ -268,9 +231,6 @@ function renderDeltaMatrix(candles) {
   }).join('');
 }
 
-/**
- * 6. 渲染歷史交易紀錄表 (完全對齊 index.html 表頭結構)
- */
 function renderHistoryTable(trades) {
   const tbody = document.getElementById('historyTableBody');
   const summaryEl = document.getElementById('historySummary');
