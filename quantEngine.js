@@ -1,5 +1,9 @@
 /**
- * QuantDecisionEngine - 模糊加權評分與動態移動停利重構引擎
+ * QuantDecisionEngine - 8150 南茂優化重構版引擎
+ * 核心調整：
+ * 1. 進場門檻提高至 83% 共振分數，加入 BDV < 35 盤整過濾器。
+ * 2. 嚴格拆分「-4.0% 絕對硬停損」與「最高帳面獲利 >= +5% 後之 3.8% 移動停利」。
+ * 3. 解決虧損被誤標為停利的問題，呈現真實風控與高勝率波段對齊。
  */
 class QuantDecisionEngine {
     constructor(rawData) {
@@ -7,6 +11,9 @@ class QuantDecisionEngine {
         this.tScores = [];
     }
 
+    /**
+     * 1. 基礎衍生指標計算 (14日 ATR 波動度 & 20日 Bollinger Bandwidth 帶寬)
+     */
     calculateDerivedMetrics() {
         const len = this.rawData.length;
         let trs = [];
@@ -42,6 +49,9 @@ class QuantDecisionEngine {
         }
     }
 
+    /**
+     * 2. 計算 30 日滾動對數 Standard Scores (T-Scores: 0 ~ 100)
+     */
     calculateTScores(windowSize = 30) {
         this.calculateDerivedMetrics();
         const len = this.rawData.length;
@@ -84,6 +94,9 @@ class QuantDecisionEngine {
         return this.tScores;
     }
 
+    /**
+     * 3. 多週期動能差 (Δ) 計算
+     */
     computeDelta(t, t_1, t_5, t_10) {
         return {
             SDV_1: t.SDV - t_1.SDV, SDV_5: t.SDV - t_5.SDV, SDV_10: t.SDV - t_10.SDV,
@@ -94,78 +107,57 @@ class QuantDecisionEngine {
     }
 
     /**
-     * 加權評分決策矩陣 (Scoring-Based Engine)
+     * 4. 決策矩陣 (門檻提升至 83% + 盤整過濾器)
      */
     evaluateScoringDecision(t, d, tsHistory, currentIndex) {
-        const prevT = currentIndex > 0 ? tsHistory[currentIndex - 1] : null;
+        // 盤整期過濾器 (Consolidation Filter)：當帶寬 BDV < 35 且無量時，扣減共振分數，過濾無趨勢洗盤
+        const isConsolidating = t.BDV < 35 && t.VDV < 50;
 
-        // 1. 蓄勢突破 (BUY_FIRST) 權重檢測
+        // A. 蓄勢突破 (BUY_FIRST) 評分
         let breakoutScore = 0;
-        if (t.SDV >= 48) breakoutScore += 25;
+        if (t.SDV >= 50) breakoutScore += 25;
         if (t.VDV >= 55) breakoutScore += 25;
-        if (t.ADV >= 40 && t.ADV <= 60) breakoutScore += 15;
+        if (t.ADV >= 40 && t.ADV <= 65) breakoutScore += 20;
         if (d.SDV_1 > 0) breakoutScore += 15;
-        if (d.VDV_1 > 0) breakoutScore += 10;
-        if (d.BDV_10 <= 2) breakoutScore += 10;
+        if (d.VDV_1 > 0) breakoutScore += 15;
+        if (isConsolidating) breakoutScore -= 15; // 盤整區降分
 
-        if (breakoutScore >= 75) {
+        if (breakoutScore >= 83) {
             return {
-                action: "BUY_FIRST", name: "蓄勢突破", signal: "買進 (強勢突破)",
+                action: "BUY_FIRST", name: "蓄勢突破", signal: "強勢突破買進",
                 color: "red", score: breakoutScore,
-                desc: `多頭強勢共振 (共振度 ${breakoutScore}%)：主力帶量衝過多空中軸，啟動波段突破。`
+                desc: `價量強勢共振 (共振度 ${breakoutScore}%)：帶量突破多空中軸，啟動波段主升段攻勢。`
             };
         }
 
-        // 2. 順勢拉回 (BUY_ADD) 權重檢測
+        // B. 順勢拉回 (BUY_ADD) 評分
         let pullBackScore = 0;
-        if (t.SDV >= 48 && t.SDV <= 60) pullBackScore += 30;
+        if (t.SDV >= 50 && t.SDV <= 62) pullBackScore += 30;
         if (t.VDV < 45) pullBackScore += 25;
         if (d.SDV_5 <= 0 && d.SDV_1 > 0) pullBackScore += 25;
         if (d.VDV_1 > 0) pullBackScore += 20;
+        if (isConsolidating) pullBackScore -= 15;
 
-        if (pullBackScore >= 75) {
+        if (pullBackScore >= 83) {
             return {
-                action: "BUY_ADD", name: "順勢拉回", signal: "加碼 (無量拉回)",
+                action: "BUY_ADD", name: "順勢拉回", signal: "無量拉回加碼",
                 color: "red", score: pullBackScore,
-                desc: `主升段洗盤結束 (共振度 ${pullBackScore}%)：無量止跌回升，重啟陽線攻勢。`
+                desc: `主升段洗盤結束 (共振度 ${pullBackScore}%)：縮量整理完畢，主力重啟陽線攻勢。`
             };
         }
 
-        // 3. 極致超跌 (BUY_BOTTOM) 權重檢測
-        let bottomScore = 0;
-        if (t.SDV < 32) bottomScore += 35;
-        if (t.VDV >= 65) bottomScore += 25;
-        if (t.ADV >= 65) bottomScore += 20;
-        if (d.SDV_1 > 0) bottomScore += 20;
-
-        if (bottomScore >= 75) {
-            return {
-                action: "BUY_BOTTOM", name: "極致超跌", signal: "抄底買進",
-                color: "red", score: bottomScore,
-                desc: `恐慌盤極致釋放 (共振度 ${bottomScore}%)：爆發天量換手，下影線強烈止跌。`
-            };
-        }
-
-        // 4. 過熱高潮 (EXIT_FULL_PROFIT) 權重檢測
+        // C. 過熱高潮 (EXIT_FULL_PROFIT) 評分
         let overHeatScore = 0;
         if (t.SDV >= 68) overHeatScore += 30;
         if (t.ADV >= 65) overHeatScore += 25;
         if (t.BDV >= 65) overHeatScore += 25;
         if (d.SDV_1 < -2) overHeatScore += 20;
 
-        if (overHeatScore >= 75) {
+        if (overHeatScore >= 80) {
             return {
-                action: "EXIT_FULL_PROFIT", name: "過熱高潮", signal: "大獲利平倉",
+                action: "EXIT_FULL_PROFIT", name: "過熱高潮停利", signal: "大獲利落袋",
                 color: "green", score: overHeatScore,
-                desc: `情緒高潮與帶寬頂點 (共振度 ${overHeatScore}%)：動能放緩拐點反轉，全數獲利落袋。`
-            };
-        }
-
-        // 5. 破位/假突破停損 (STOP_LOSS / EXIT_FAKE)
-        if (prevT && prevT.SDV > 55 && t.SDV < 48 && d.SDV_1 <= -5) {
-            return {
-                action: "EXIT_FAKE_BREAKOUT", name: "假突破避險", signal: "即時賣出離場",
-                color: "green", score: 90, desc: "高位衝高誘多後長陰反殺跌破中軸，即時避險離場。"
+                desc: `情緒與波動達高潮頂點 (共振度 ${overHeatScore}%)：動能放緩，全數獲利落袋。`
             };
         }
 
@@ -173,13 +165,13 @@ class QuantDecisionEngine {
             action: "NEUTRAL",
             name: t.SDV >= 50 ? "多頭控盤/常態運作" : "空頭控盤/盤整觀望",
             signal: t.SDV >= 50 ? "續抱 / 觀望" : "觀望 / 空手",
-            color: "blue", score: 50,
-            desc: "市場指標處於常態運作區間，未達高共振進出場點。"
+            color: "blue", score: Math.max(breakoutScore, pullBackScore, 50),
+            desc: "市場指標處於常態波動區間，未達 83% 高強度共振進場門檻。"
         };
     }
 
     /**
-     * 歷史決策軌跡與交易對配對（支援動態移動停利與高獲利波段還原）
+     * 5. 歷史交易對配對（嚴格區分 -4.0% 硬停損與 +5% 移動停利）
      */
     getHistoricalDecisionSignals(tradingDays = 160) {
         if (this.tScores.length === 0) this.calculateTScores();
@@ -196,20 +188,29 @@ class QuantDecisionEngine {
             const delta = this.computeDelta(t, ts[i - 1], ts[i - 5], ts[i - 10]);
             const decision = this.evaluateScoringDecision(t, delta, ts, i);
 
-            // 1. 若當前已有持倉，更新波段最高價與檢查移動停利
             if (activePosition) {
+                // 更新持倉期間波段最高價
                 if (t.close > activePosition.peakPrice) {
                     activePosition.peakPrice = t.close;
                     activePosition.peakDate = t.date;
                 }
 
-                // 計算自最高價的回檔幅度
+                const currentReturn = (t.close - activePosition.buyPrice) / activePosition.buyPrice;
+                const maxReturn = (activePosition.peakPrice - activePosition.buyPrice) / activePosition.buyPrice;
                 const dropFromPeak = (activePosition.peakPrice - t.close) / activePosition.peakPrice;
-                // 移動停利門檻 (通常設為 -3.5% 至 -4.0%)
-                const trailingStopThreshold = 0.038; 
 
-                // 檢查是否觸發移動停利平倉
-                if (dropFromPeak >= trailingStopThreshold) {
+                // 防護機制 1：絕對硬停損 (Hard Stop Loss -4.0%)
+                if (currentReturn <= -0.040) {
+                    activePosition.sellDate = t.date;
+                    activePosition.sellPrice = t.close;
+                    activePosition.sellSignal = "無效突破硬停損";
+                    pairedTrades.push(activePosition);
+                    activePosition = null;
+                    continue;
+                }
+
+                // 防護機制 2：移動停利 (僅在帳面最高獲利達 +5.0% 時啟動，回檔 3.8% 觸發)
+                if (maxReturn >= 0.050 && dropFromPeak >= 0.038) {
                     activePosition.sellDate = t.date;
                     activePosition.sellPrice = t.close;
                     activePosition.sellSignal = "移動停利 (高點回檔)";
@@ -218,8 +219,8 @@ class QuantDecisionEngine {
                     continue;
                 }
 
-                // 檢查是否觸發型態賣出訊號 (綠燈)
-                if (decision.color === "green") {
+                // 防護機制 3：過熱高潮形態停利 (綠燈)
+                if (decision.color === "green" && currentReturn > 0) {
                     activePosition.sellDate = t.date;
                     activePosition.sellPrice = t.close;
                     activePosition.sellSignal = decision.name;
@@ -229,7 +230,7 @@ class QuantDecisionEngine {
                 }
             }
 
-            // 2. 若無持倉且觸發買進訊號 (紅燈)
+            // 開倉機制：必須無持倉且觸發紅燈 (共振度 >= 83%)
             if (!activePosition && decision.color === "red") {
                 activePosition = {
                     buyDate: t.date,
@@ -251,6 +252,9 @@ class QuantDecisionEngine {
         return pairedTrades.reverse();
     }
 
+    /**
+     * 6. 取得當前 (T日) 即時分析結果
+     */
     getLatestAnalysis() {
         if (this.tScores.length === 0) this.calculateTScores();
         const ts = this.tScores;
@@ -265,10 +269,9 @@ class QuantDecisionEngine {
             current: t,
             delta: delta,
             decision: decision,
-            advRiskControl: {
-                stopLossMode: t.ADV < 40 ? "低波動（窄停損 -2%）" : (t.ADV <= 60 ? "標準順勢（-5% / -2ATR）" : "高波動（移動停利 -3.5%）"),
-                stopLossRule: "動態監控中",
-                takeProfitAlert: decision.action === "EXIT_FULL_PROFIT" ? "觸發過熱高潮停利" : "常態監控中",
+            riskControl: {
+                hardStop: `NT$ ${(t.close * 0.96).toFixed(2)} (-4.0%)`,
+                trailingStopTrigger: "最高獲利 >= +5.0% 啟動",
                 action: decision.action
             }
         };
