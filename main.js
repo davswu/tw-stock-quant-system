@@ -3,7 +3,7 @@
  */
 
 // GAS API 資料服務端點
-const GAS_API_URL = "https://script.google.com/macros/s/AKfycbw07G2hmdd4EkOVgm5yYKJB23pKhdp8AnXDhKz7Xf03pcf6Tk_TvigJcsDliF_1GSiu/exec";
+const GAS_API_URL = "https://script.google.com/macros/s/AKfycbyBuAVQFpXeJesJio41SNH57IDMF0aJxNXX3RlHiQS9Ned_ZmKpv8gkX8e9Ymkt9ZZm/exec";
 
 document.addEventListener('DOMContentLoaded', () => {
   const engine = new QuantEngine();
