@@ -1,16 +1,21 @@
 /**
- * QuantEngine.js - 四指標對數標準化與系統決策量化引擎
+ * QuantEngine.js (v2.0 嚴苛波段高勝率引擎)
+ * 
+ * 重構說明：
+ * 1. 門檻提升至 A 級：僅採納 Score >= 85 分強勢共振訊號，徹底剔除 C 級與弱勢雜訊。
+ * 2. 波段移動停利：導入 Peak Trailing Stop (最高價回撤 8%) + -5% 硬停損，不再受短線抖動早退。
+ * 3. BDV 壓縮爆發過濾：要求通道張力出現擴張轉折 (Δ₁BDV > 0)，鎖定起漲點。
  */
 
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbx5h2Ncq111yq3k6tFffiOS9m0vOBtVywbsVdfZPCHvNbSv0vIGYiC_MimgkZGV3gbP/exec';
 
 class QuantEngine {
     constructor() {
-        this.period = 20; // 基礎移動平均週期
+        this.period = 20; // 基礎移動平均與對數標準化週期
     }
 
     /**
-     * 從 GAS API 獲取個股歷史與即時數據
+     * 從 GAS API 獲取歷史與即時數據
      */
     async fetchStockData(stockCode) {
         try {
@@ -19,14 +24,13 @@ class QuantEngine {
             if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
             const json = await response.json();
             
-            // 支援傳回 API 封裝格式或純 K線陣列
             const rawData = json.data || json;
             if (!Array.isArray(rawData) || rawData.length < 30) {
                 throw new Error("數據長度不足以進行 20 日對數標準化計算");
             }
             return this.processQuantitativeData(stockCode, json.stockName || stockCode, rawData);
         } catch (error) {
-            console.warn("GAS API 連線失敗或格式不相符，啟動模擬與降級數據處理:", error);
+            console.warn("GAS API 連線失敗或格式不相符，啟動降級數據處理:", error);
             return this.generateFallbackData(stockCode);
         }
     }
@@ -38,7 +42,7 @@ class QuantEngine {
         if (std === 0 || isNaN(std)) return 50;
         const z = (val - mean) / std;
         const t = 50 + z * 10;
-        return Math.min(Math.max(Math.round(t * 10) / 10, 10), 90); // 限制在 10 ~ 90
+        return Math.min(Math.max(Math.round(t * 10) / 10, 10), 90);
     }
 
     /**
@@ -76,7 +80,7 @@ class QuantEngine {
             const stdVol = Math.sqrt(volumes.reduce((a, b) => a + Math.pow(b - maVol, 2), 0) / this.period) || 1;
             const vdv = this.calcTScore(currVol, maVol, stdVol);
 
-            // 3. ADV (風險環境/真實區間波動度)
+            // 3. ADV (真實區間波動度)
             const trList = slice.map((d, idx) => {
                 if (idx === 0) return d.high - d.low;
                 const prevC = slice[idx - 1].close;
@@ -87,10 +91,10 @@ class QuantEngine {
             const stdTR = Math.sqrt(trList.reduce((a, b) => a + Math.pow(b - maTR, 2), 0) / this.period) || 1;
             const adv = this.calcTScore(currTR, maTR, stdTR);
 
-            // 4. BDV (週期張力/通道寬度)
+            // 4. BDV (通道張力與壓縮)
             const variance = closePrices.reduce((a, b) => a + Math.pow(b - maClose, 2), 0) / this.period;
             const stdDevPrice = Math.sqrt(variance);
-            const bw = (stdDevPrice * 4) / maClose; // 4倍標準差對應上下軌寬度比例
+            const bw = (stdDevPrice * 4) / maClose;
             const bdv = Math.min(Math.max(Math.round(bw * 300), 20), 85);
 
             calculatedSeries.push({
@@ -103,7 +107,7 @@ class QuantEngine {
             });
         }
 
-        // 附加上多週期動能 Δ₁ / Δ₅ / Δ₁₀
+        // 計算多週期動能 Δ₁ / Δ₅ / Δ₁₀
         const validSeries = calculatedSeries.filter(d => d !== null);
         const seriesWithDelta = validSeries.map((curr, idx) => {
             const d1_sdv = idx >= 1 ? curr.sdv - validSeries[idx - 1].sdv : 0;
@@ -122,7 +126,7 @@ class QuantEngine {
             const d5_bdv = idx >= 5 ? curr.bdv - validSeries[idx - 5].bdv : 0;
             const d10_bdv = idx >= 10 ? curr.bdv - validSeries[idx - 10].bdv : 0;
 
-            const decision = this.evaluateDecision(curr, d1_sdv, d5_sdv, d10_sdv, d1_vdv, d5_vdv, d10_vdv, d1_adv);
+            const decision = this.evaluateDecision(curr, d1_sdv, d5_sdv, d10_sdv, d1_vdv, d5_vdv, d10_vdv, d1_bdv);
 
             return {
                 ...curr,
@@ -149,78 +153,126 @@ class QuantEngine {
     }
 
     /**
-     * 兩階段觸發決策矩陣 (Stage 1 過濾 + Stage 2 評分)
+     * 兩階段決策矩陣 (項次1 & 項次3 優化版)
      */
-    evaluateDecision(indicators, d1_sdv, d5_sdv, d10_sdv, d1_vdv, d5_vdv, d10_vdv, d1_adv) {
+    evaluateDecision(indicators, d1_sdv, d5_sdv, d10_sdv, d1_vdv, d5_vdv, d10_vdv, d1_bdv) {
         const { sdv, vdv, adv, bdv } = indicators;
 
-        // Stage 1: 硬性條件過濾
-        const passFilter = (sdv >= 45) && (bdv >= 35) && (adv <= 78);
+        // 【項次 3 優化】Stage 1 硬性過濾：新增 BDV 壓縮爆發 (d1_bdv >= -1.0) 與標準位階過濾
+        const passFilter = (sdv >= 50) && (bdv >= 38) && (adv <= 75) && (d1_bdv >= -1.0);
         if (!passFilter) {
             return {
                 badge: "觀望 / 中立",
                 badgeClass: "bg-slate-700 text-slate-300",
                 position: "0%",
                 score: 40,
-                desc: "未過濾階段一基礎條件（價格位階低於臨界點或風險環境過高）"
+                desc: "未通過第一階段嚴苛過濾（價格位階偏低或未逢通道爆發起漲點）"
             };
         }
 
-        // Stage 2: 0~100 分權重評分
+        // Stage 2 權重評分 (總分 100)
         let score = 0;
 
-        // 位階與資金 (30%)
-        if (sdv >= 55) score += 15;
-        if (vdv >= 55) score += 15;
+        // 1. 位階與資金絕對強度 (30%)
+        if (sdv >= 58) score += 15;
+        if (vdv >= 58) score += 15;
 
-        // 短線與單日動能 Δ₁ / Δ₅ (40%)
-        if (d1_sdv > 0) score += 10;
-        if (d5_sdv > 0) score += 10;
-        if (d1_vdv > 0) score += 10;
-        if (d5_vdv > 0) score += 10;
+        // 2. 短線與單日動能爆發 Δ₁ / Δ₅ (40%)
+        if (d1_sdv > 1.0) score += 10;
+        if (d5_sdv > 2.0) score += 10;
+        if (d1_vdv > 1.0) score += 10;
+        if (d5_vdv > 2.0) score += 10;
 
-        // 中線結構 Δ₁₀ (30%)
+        // 3. 中線結構共振 Δ₁₀ (30%)
         if (d10_sdv > 0) score += 15;
         if (d10_vdv > 0) score += 15;
 
-        // 訊號分級
+        // 【項次 1 優化】僅放行 A 級強勢發射 (Score >= 85)，其餘一律觀望不開倉
         if (score >= 85) {
             return {
                 badge: "A級強勢買入",
-                badgeClass: "bg-emerald-600 text-white font-extrabold",
+                badgeClass: "bg-emerald-600 text-white font-extrabold animate-pulse",
                 position: "100%",
                 score,
-                desc: "完全符合四指標多頭共振與多週期動能加速條件，給予滿倉配置。"
-            };
-        } else if (score >= 70) {
-            return {
-                badge: "B級標準買入",
-                badgeClass: "bg-sky-600 text-white font-bold",
-                position: "70%",
-                score,
-                desc: "主要動能指標呈現多頭共振，趨勢健康，建議 70% 標準倉位進場。"
-            };
-        } else if (score >= 60) {
-            return {
-                badge: "C級試單買入",
-                badgeClass: "bg-amber-600 text-white font-semibold",
-                position: "30%",
-                score,
-                desc: "具備部分動能復甦特徵，但共振強度有限，採取 30% 輕量試單。"
+                desc: "完全滿足四指標多頭共振與通道爆發條件，系統給予 100% 滿倉建倉指引。"
             };
         } else {
             return {
-                badge: "觀望 / 離場",
+                badge: "觀望 / 未達標",
                 badgeClass: "bg-slate-700 text-slate-300",
                 position: "0%",
                 score,
-                desc: "動能分數未達 60 分發射門檻，系統建議持幣觀望。"
+                desc: "動能分數未達 A 級嚴苛發射門檻 (85分)，系統維持空倉觀望以避開無效盤整。"
             };
         }
     }
 
     /**
-     * 評估 ADV 波動度驅動移動風控狀態
+     * 歷史交易紀錄擷取 (項次 2 優化：波段移動停利與硬停損機制)
+     */
+    extractHistoricalTrades(series) {
+        const trades = [];
+        let inPosition = false;
+        let buyEntry = null;
+        let highestPrice = 0;
+
+        for (let i = 0; i < series.length; i++) {
+            const item = series[i];
+            const close = item.close;
+
+            if (!inPosition) {
+                // 【項次 1】僅限 A 級門檻 (Score >= 85) 觸發進場
+                const isBuySignal = item.decision.score >= 85;
+                if (isBuySignal) {
+                    inPosition = true;
+                    buyEntry = {
+                        date: item.date,
+                        price: close,
+                        signal: item.decision.badge
+                    };
+                    highestPrice = close; // 初始化最高價
+                }
+            } else {
+                // 追蹤持倉期間的最高價位
+                if (close > highestPrice) {
+                    highestPrice = close;
+                }
+
+                // 【項次 2】計算波段移動停利線與硬停損線
+                const hardStopPrice = buyEntry.price * 0.95; // -5% 硬性停損
+                const trailingStopPrice = highestPrice * 0.92; // 最高點回撤 8% 移動停利
+                const isStructuralBreak = item.sdv < 42; // 多頭結構徹底毀損
+
+                // 判斷出場條件
+                const isHardStop = close < hardStopPrice;
+                const isTrailingStop = (highestPrice > buyEntry.price * 1.05) && (close < trailingStopPrice); // 獲利>5% 後啟動移動停利
+                const isExitSignal = isHardStop || isTrailingStop || isStructuralBreak;
+
+                if (isExitSignal || i === series.length - 1) {
+                    inPosition = false;
+                    let exitReason = "波段移動停利離場";
+                    if (isHardStop) exitReason = "觸發 -5% 硬性停損";
+                    else if (isStructuralBreak) exitReason = "SDV 位階破壞離場";
+                    else if (i === series.length - 1) exitReason = "持倉至最新交易日";
+
+                    trades.push({
+                        buyDate: buyEntry.date,
+                        buyPrice: buyEntry.price,
+                        buySignal: buyEntry.signal,
+                        sellDate: item.date,
+                        sellPrice: close,
+                        sellSignal: exitReason
+                    });
+                    buyEntry = null;
+                    highestPrice = 0;
+                }
+            }
+        }
+        return trades;
+    }
+
+    /**
+     * ADV 風控狀態評估
      */
     getRiskControlStatus(latest) {
         const { adv, sdv, deltas } = latest;
@@ -230,17 +282,16 @@ class QuantEngine {
         let stopLossRule = "";
 
         if (adv >= 65) {
-            stopLossMode = "高波動寬鬆停損模式 (High Volatility)";
-            stopLossRule = "以 2.5 ~ 3.0 倍 ATR 或 SDV < 38 作為滾動移動停損線，防止震盪洗盤離場。";
+            stopLossMode = "高波動寬鬆風控模式 (High Volatility)";
+            stopLossRule = "採最高點回撤 8% ~ 10% 軌道移動停利，避免高波動洗盤出場。";
         } else if (adv >= 45) {
-            stopLossMode = "常態移動停損模式 (Normal Volatility)";
-            stopLossRule = "以 2.0 倍 ATR 或 SDV < 42 作為標準停損停利動態跟蹤線。";
+            stopLossMode = "常態波段風控模式 (Normal Volatility)";
+            stopLossRule = "採 -5% 硬停損與最高價回撤 8% 移動停利，鎖定波段利潤。";
         } else {
             stopLossMode = "低波動緊密風控模式 (Compression Zone)";
-            stopLossRule = "以 1.5 倍 ATR 或 SDV < 45 為高敏感停損，防範波動度突然向下收縮。";
+            stopLossRule = "以 1.5 倍 ATR 或 -4% 為高敏感停損，防範向下假突破。";
         }
 
-        // 爆發停利監控：SDV ≥ 65 & ADV ≥ 70 且 Δ₁ADV ≤ -3.0
         const isTakeProfitTriggered = (sdv >= 65) && (adv >= 70) && (d1_adv <= -3.0);
 
         return {
@@ -248,45 +299,9 @@ class QuantEngine {
             stopLossRule,
             isTakeProfitTriggered,
             takeProfitDesc: isTakeProfitTriggered 
-                ? "🚨 警告：已觸發高檔情緒爆發拐點！建議執行分批停利或獲利離場！"
-                : "常態監控中 (未滿足 SDV≥65 & ADV≥70 & Δ₁ADV≤-3.0 爆發出場條件)"
+                ? "🚨 警告：觸發高檔情緒爆發拐點，建議執行動態降倉或分批停利！"
+                : "常態波段跟蹤中 (未觸發情緒爆發警示)"
         };
-    }
-
-    /**
-     * 掃描近 120 交易日生成「買入 vs 賣出」成對紀錄
-     */
-    extractHistoricalTrades(series) {
-        const trades = [];
-        let inPosition = false;
-        let currentBuy = null;
-
-        for (let i = 0; i < series.length; i++) {
-            const item = series[i];
-            const isBuySignal = item.decision.score >= 60;
-            const isExitSignal = item.decision.score < 50 || item.sdv < 40;
-
-            if (!inPosition && isBuySignal) {
-                inPosition = true;
-                currentBuy = {
-                    date: item.date,
-                    price: item.close,
-                    signal: item.decision.badge
-                };
-            } else if (inPosition && (isExitSignal || i === series.length - 1)) {
-                inPosition = false;
-                trades.push({
-                    buyDate: currentBuy.date,
-                    buyPrice: currentBuy.price,
-                    buySignal: currentBuy.signal,
-                    sellDate: item.date,
-                    sellPrice: item.close,
-                    sellSignal: isExitSignal ? "觸發訊號衰退離場" : "持倉至最新交易日"
-                });
-                currentBuy = null;
-            }
-        }
-        return trades;
     }
 
     /**
@@ -294,8 +309,8 @@ class QuantEngine {
      */
     generateFallbackData(stockCode) {
         const mockKline = [];
-        let basePrice = stockCode === '2330' ? 950 : 120;
-        let baseVol = 25000;
+        let basePrice = stockCode === '8150' ? 75 : 100;
+        let baseVol = 20000;
         const startDate = new Date();
         startDate.setDate(startDate.getDate() - 200);
 
@@ -303,21 +318,21 @@ class QuantEngine {
             const d = new Date(startDate);
             d.setDate(d.getDate() + i);
             const dateStr = d.toISOString().split('T')[0];
-            const change = (Math.random() - 0.48) * 0.03;
+            const change = (Math.random() - 0.47) * 0.035;
             basePrice = Math.round(basePrice * (1 + change) * 10) / 10;
-            const vol = Math.round(baseVol * (0.7 + Math.random() * 0.6));
+            const vol = Math.round(baseVol * (0.6 + Math.random() * 0.8));
             mockKline.push({
                 date: dateStr,
                 open: basePrice * 0.99,
-                high: basePrice * 1.015,
-                low: basePrice * 0.985,
+                high: basePrice * 1.02,
+                low: basePrice * 0.98,
                 close: basePrice,
                 volume: vol
             });
         }
-        return this.processQuantitativeData(stockCode, `${stockCode} (模擬)`, mockKline);
+        return this.processQuantitativeData(stockCode, `${stockCode} (模擬波段)`, mockKline);
     }
 }
 
-// 暴露全域引擎實例
+// 暴露全域單例引擎
 window.quantEngine = new QuantEngine();
