@@ -1,5 +1,5 @@
 /**
- * QuantDecisionEngine v2.2 - 針對強勢飆股波段優化之對數標準化決策引擎
+ * QuantDecisionEngine v2.5 - 嚴格防禦與冷卻機制重構版
  */
 class QuantDecisionEngine {
     constructor(rawData) {
@@ -79,6 +79,9 @@ class QuantDecisionEngine {
             const curr = this.rawData[i];
             tScoresHistory.push({
                 date: curr.date,
+                open: curr.open || curr.close,
+                high: curr.high,
+                low: curr.low,
                 close: curr.close,
                 volume: curr.volume,
                 SDV: calcTS(curr.close, lnP),
@@ -92,25 +95,6 @@ class QuantDecisionEngine {
         return this.tScores;
     }
 
-    getLatestAnalysis() {
-        if (this.tScores.length === 0) this.calculateTScores();
-        const ts = this.tScores;
-        const len = ts.length;
-        if (len < 11) return null;
-
-        const t = ts[len - 1];
-        const delta = this.computeDelta(t, ts[len - 2], ts[len - 6], ts[len - 11]);
-        return {
-            current: t,
-            delta: delta,
-            decision: this.matchDecisionMatrix(t, delta, ts, len - 1),
-            advRiskControl: this.evaluateADVRiskControl(t, delta)
-        };
-    }
-
-    /**
-     * 重構：對接飆股波段與精準重現模擬交易對
-     */
     getHistoricalDecisionSignals(tradingDays = 180) {
         if (this.tScores.length === 0) this.calculateTScores();
         const ts = this.tScores;
@@ -120,67 +104,73 @@ class QuantDecisionEngine {
         const startIndex = Math.max(10, len - tradingDays);
         let activePosition = null; 
         let pairedTrades = [];
+        let lastExitIndex = -999; // 記錄上次平倉的 K 線索引（用於冷卻期）
 
         for (let i = startIndex; i < len; i++) {
             const t = ts[i];
             const delta = this.computeDelta(t, ts[i - 1], ts[i - 5], ts[i - 10]);
             const decision = this.matchDecisionMatrix(t, delta, ts, i);
-            const advRisk = this.evaluateADVRiskControl(t, delta);
 
-            // 1. 若無持倉，檢查是否觸發買進訊號
+            // 1. 若無持倉，檢查買進訊號（必須符合冷卻期機制）
             if (!activePosition) {
-                if (decision.color === "red" && decision.confidence >= 70) {
+                const cooldownPassed = (i - lastExitIndex) >= 4; // 強制 4 個交易日冷卻期
+
+                if (cooldownPassed && decision.color === "red" && decision.confidence >= 80) {
                     activePosition = {
+                        buyIndex: i,
                         buyDate: t.date,
                         buyPrice: t.close,
                         buySignal: decision.name,
                         highestPrice: t.close,
+                        stopPrice: t.close * 0.96, // 嚴格 -4% 停損防線
                         sellDate: "--",
                         sellPrice: null,
                         sellSignal: "持倉監控中"
                     };
                 }
             } 
-            // 2. 若已持倉，進行動態追蹤與離場監控
+            // 2. 持倉監控與精準處置
             else {
-                if (t.close > activePosition.highestPrice) {
-                    activePosition.highestPrice = t.close;
+                if (t.high > activePosition.highestPrice) {
+                    activePosition.highestPrice = t.high;
                 }
 
                 const currentGain = (t.close - activePosition.buyPrice) / activePosition.buyPrice;
                 const pullbackFromPeak = (activePosition.highestPrice - t.close) / activePosition.highestPrice;
 
                 let isExit = false;
+                let exitPrice = t.close;
                 let exitReason = "";
 
-                // A. 極致過熱 / 噴發頂點獲利平倉
-                if (decision.color === "green") {
+                // A. 觸發 -4.0% 停損條件（檢查是否含盤中觸及與跳空狀況）
+                if (t.low <= activePosition.stopPrice) {
                     isExit = true;
+                    // 若開盤直接跳空跌破停損價，以開盤價成交；否則精準以 -4% 停損價成交
+                    exitPrice = t.open < activePosition.stopPrice ? t.open : activePosition.stopPrice;
+                    const actualPct = ((exitPrice - activePosition.buyPrice) / activePosition.buyPrice) * 100;
+                    exitReason = `觸發硬停損 (${actualPct.toFixed(1)}%)`;
+                }
+                // B. 高位獲利波段拉回 -3.5% 移動停利
+                else if (currentGain >= 0.12 && pullbackFromPeak >= 0.035) {
+                    isExit = true;
+                    exitPrice = t.close;
+                    exitReason = `移動停利鎖利 (-3.5% 高點拉回)`;
+                }
+                // C. 系統極致過熱 / 減速訊號離場
+                else if (decision.color === "green") {
+                    isExit = true;
+                    exitPrice = t.close;
                     exitReason = decision.name;
-                }
-                // B. 高獲利狀態下（> 15%）出現動能減速或高位急拉回落
-                else if (currentGain >= 0.15 && (delta.SDV_1 <= -2.0 || pullbackFromPeak >= 0.03)) {
-                    isExit = true;
-                    exitReason = "過熱噴發 / 高位獲利鎖利";
-                }
-                // C. ADV 極端過熱拐點
-                else if (advRisk.action === "EXIT_FULL") {
-                    isExit = true;
-                    exitReason = advRisk.takeProfitAlert;
-                }
-                // D. 硬停損防線 (-4.0%)
-                else if (currentGain <= -0.040) {
-                    isExit = true;
-                    exitReason = "硬停損防線 (-4.0%)";
                 }
 
                 if (isExit) {
                     activePosition.sellDate = t.date;
-                    activePosition.sellPrice = t.close;
+                    activePosition.sellPrice = exitPrice;
                     activePosition.sellSignal = exitReason;
                     
                     pairedTrades.push(activePosition);
                     activePosition = null;
+                    lastExitIndex = i; // 更新平倉時間點，啟動冷卻期
                 }
             }
         }
@@ -201,67 +191,30 @@ class QuantDecisionEngine {
         };
     }
 
-    evaluateADVRiskControl(t, delta) {
-        let stopLossMode = "", stopLossRule = "", takeProfitAlert = "常態監控中", action = "HOLD";
-
-        if (t.ADV < 40) {
-            stopLossMode = "低波動蓄勢期（窄停損）";
-            stopLossRule = "進場價 -2.0% 或跌破關鍵位 (SDV < 45)";
-        } else if (t.ADV <= 60) {
-            stopLossMode = "常態順勢期（標準停損）";
-            stopLossRule = "進場價 -4.0% 或 -2.0 × ATR 防線";
-        } else {
-            stopLossMode = "高波動爆發期（移動緊縮停利）";
-            stopLossRule = "自波段最高價回檔 -3.0% (Trailing Stop)";
-        }
-
-        if (t.SDV >= 68 && t.ADV >= 65 && delta.ADV_1 <= -2.0) {
-            takeProfitAlert = "觸發【過熱噴發拐點停利 (Blow-off Top)】";
-            action = "EXIT_FULL";
-        } else if (t.SDV >= 70 && t.BDV >= 68 && delta.SDV_1 <= -2.0) {
-            takeProfitAlert = "觸發【雙重離差過熱防線 (SDV + BDV 共振)】";
-            action = "EXIT_FULL";
-        }
-
-        return { stopLossMode, stopLossRule, takeProfitAlert, action };
-    }
-
     /**
-     * 重構：包含飆股衝刺靈敏度的決策矩陣
+     * 重構後決策矩陣：加入防追高天花板與強濾網
      */
     matchDecisionMatrix(t, d, tsHistory, currentIndex) {
         const { SDV, VDV, ADV, BDV } = t;
         const prevT1 = currentIndex > 0 ? tsHistory[currentIndex - 1] : null;
 
-        // 【買進 1】：飆股動能強勢起漲 (專門捕捉像 5/20 $74.40、9/18 $94.00 這類爆發點)
-        if (SDV >= 48 && VDV >= 52 && (d.SDV_1 + d.VDV_1 >= 3.5 || d.SDV_5 >= 5.0)) {
-            let score = 80;
-            if (d.SDV_1 >= 3.0) score += 15;
-            return { action: "BUY_BREAKOUT", name: "飆股動能起漲", signal: "強勢買进", color: "red", confidence: Math.min(100, score), desc: "價量雙重動能爆發突破，資金高度集中，開啟波段攻勢。" };
+        // 【嚴格防線】過熱天花板限制：SDV > 60 或 BDV > 62 時，一律禁止開倉買進（防買在頂部誘多）
+        const isOverboughtFloor = SDV > 60.0 || BDV > 62.0;
+
+        // 1. 真實動能起漲 (必須從低/中位發動，且帶寬未過度張裂)
+        if (!isOverboughtFloor && SDV >= 48.0 && SDV <= 58.0 && BDV <= 55.0 && VDV >= 52.0 && d.SDV_1 >= 2.5 && d.VDV_1 >= 2.0) {
+            return { action: "BUY_BREAKOUT", name: "飆股動能起漲", signal: "強勢買進", color: "red", confidence: 85, desc: "底部位階完成，價量同步爆發起漲，極具獲利空間。" };
         }
 
-        // 【買進 2】：蓄勢突破
-        if (ADV >= 35 && ADV <= 58 && SDV >= 48 && SDV <= 65 && VDV >= 50) {
-            let score = 75;
-            if (d.SDV_1 >= 2.0) score += 10;
-            if (d.VDV_1 >= 2.0) score += 10;
-            return { action: "BUY_FIRST", name: "蓄勢突破", signal: "買進 (首筆)", color: "red", confidence: Math.min(100, score), desc: "變盤蓄勢完成，主力放量衝過中軸，啟動強勢突破。" };
+        // 2. 洗盤後回升 (假跌破掃蕩)
+        const brokeUnder50AndRecovered = prevT1 && prevT1.SDV < 49.0 && SDV >= 48.0;
+        if (!isOverboughtFloor && brokeUnder50AndRecovered && BDV <= 52.0 && d.SDV_1 >= 3.5) {
+            return { action: "BUY_BEAR_TRAP", name: "假跌破掃蕩", signal: "買進 (掃蕩)", color: "red", confidence: 80, desc: "主力誘空洗盤結束，迅速收復中軸發動攻勢。" };
         }
 
-        // 【買進 3】：假跌破掃蕩 (專門捕捉 7/31 $72.60 的洗盤後回升)
-        const brokeUnder50AndRecovered = prevT1 && prevT1.SDV < 50 && SDV >= 48;
-        if (brokeUnder50AndRecovered && d.SDV_1 >= 3.0) {
-            return { action: "BUY_BEAR_TRAP", name: "假跌破掃蕩", signal: "買進 (掃蕩)", color: "red", confidence: 85, desc: "誘空洗盤結束，爆發長陽吞噬並強勢收復多空中軸。" };
-        }
-
-        // 【賣出 1】：過熱高潮 / 噴發頂點 (專門捕捉 5/29 $113.00、8/11 $99.00、9/24 $112.00)
-        if (SDV >= 68 && (d.SDV_1 <= -1.5 || d.VDV_1 <= -2.0 || BDV >= 68)) {
-            return { action: "EXIT_FULL_PROFIT", name: "過熱高潮離場", signal: "高位獲利平倉", color: "green", confidence: 95, desc: "指標進入極致超買區，動能開始放緩減速，落袋為安。" };
-        }
-
-        // 【賣出 2】：破位停損
-        if (SDV < 45 && d.SDV_1 <= -2.5) {
-            return { action: "STOP_LOSS", name: "破位停損", signal: "完全停損離場", color: "green", confidence: 90, desc: "跌破多空中軸，伴隨恐慌殺多賣壓，趨勢轉空停損。" };
+        // 3. 過熱高潮平倉 (出場機制)
+        if (SDV >= 68.0 && (d.SDV_1 <= -1.5 || BDV >= 68.0)) {
+            return { action: "EXIT_FULL_PROFIT", name: "過熱高潮離場", signal: "高位獲利平倉", color: "green", confidence: 95, desc: "指標進入極致超買區，動能開始衰減，鎖定獲利離場。" };
         }
 
         return {
