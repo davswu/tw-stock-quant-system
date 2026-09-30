@@ -1,97 +1,92 @@
 /**
- * main.js - 動態股票搜尋、GAS API 數據同步與 v3.2 量化引擎控制層
+ * main.js - 畫面渲染、動態個股查詢與量化風控控制層
  */
 
-// 最新 GAS API 資料服務端點
-const GAS_API_URL = "https://script.google.com/macros/s/AKfycby01s3DCjkHCzUlO65zkn_LQ0JlzwCKSgj5VBMkPN6xvdtEiAIHCPfLcRMbwm4vk241/exec";
+// 您最新的 GAS API 資料服務端點
+const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx5h2Ncq111yq3k6tFffiOS9m0vOBtVywbsVdfZPCHvNbSv0vIGYiC_MimgkZGV3gbP/exec";
 
 document.addEventListener('DOMContentLoaded', () => {
-  // 初始化量化風控引擎
+  // 初始化量化引擎
   const engine = new QuantEngine();
 
-  // 1. DOM 節點繫結 (搜尋與狀態區)
-  const inputStock = document.getElementById('inputStockCode');       // 股票代碼輸入框
-  const btnSearch = document.getElementById('btnSearchStock');        // 搜尋/執行按鈕
-  const elStockTitle = document.getElementById('stockTitleDisplay');   // 股票名稱與代碼標題 display
+  // 1. 畫面 DOM 節點繫結
+  const elStockInput = document.getElementById('stockInput');
+  const btnSearch = document.getElementById('btnSearch') || document.getElementById('btnRunBacktest');
+  
+  const elStockTitle = document.getElementById('stockTitle') || document.getElementById('stockName');
+  const elCapital = document.getElementById('totalCapital');
+  const elReturn = document.getElementById('totalReturn');
+  const elWinRate = document.getElementById('winRate');
+  const elTradeTable = document.getElementById('tradeHistoryBody');
+  const elCurrentSignal = document.getElementById('currentSignalCard');
   const elStatus = document.getElementById('statusMessage') || document.getElementById('apiStatus');
 
-  // 2. DOM 節點繫結 (儀表板與歷史紀錄區)
-  const elCapital = document.getElementById('totalCapital');          // 最終資產
-  const elReturn = document.getElementById('totalReturn');            // 總報酬率
-  const elWinRate = document.getElementById('winRate');              // 勝率
-  const elTradeTable = document.getElementById('tradeHistoryBody');   // 交易歷史表格 Body
-  const elCurrentSignal = document.getElementById('currentSignalCard');// 即時訊號卡片
-
   /**
-   * 主核心流程：從 GAS API 抓取指定股票數據並執行量化回測
-   * @param {string} stockCode 股票代碼 (例: "2330")
+   * 2. 發起非同步 API 請求 (支援動態傳入個股代碼)
    */
-  async function fetchAndRenderDashboard(stockCode = '2330') {
-    const cleanStockCode = stockCode.toString().trim();
-    if (!cleanStockCode) {
-      alert('請輸入有效的股票代碼！');
-      return;
-    }
+  async function fetchStockAndRender(stockCode = '2330') {
+    const cleanStockCode = stockCode.toString().trim() || '2330';
 
-    // 提示連線狀態
     if (elStatus) {
-      elStatus.textContent = `⏳ 正在查詢 [${cleanStockCode}] 並擷取 180 個月歷史行情數據...`;
+      elStatus.textContent = `⏳ 正連線 GAS API 抓取 [${cleanStockCode}] 行情數據中...`;
       elStatus.className = 'text-amber-400 font-medium animate-pulse text-xs';
     }
 
     try {
-      // 動態組裝 API 帶參數 URL (例如: .../exec?stock=2330)
-      const fetchUrl = `${GAS_API_URL}?stock=${encodeURIComponent(cleanStockCode)}`;
+      // 組合 API URL，帶入股票代碼 query parameter
+      const requestUrl = `${GAS_API_URL}?stock=${encodeURIComponent(cleanStockCode)}`;
 
-      const response = await fetch(fetchUrl, {
+      const response = await fetch(requestUrl, {
         method: 'GET',
         redirect: 'follow'
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP 請求異常，狀態碼: ${response.status}`);
+        throw new Error(`HTTP 錯誤碼: ${response.status}`);
       }
 
-      const result = await response.json();
+      const rawResult = await response.json();
 
-      if (result.status === 'error') {
-        throw new Error(`GAS 後端回應錯誤: ${result.message}`);
+      if (rawResult.status === 'error') {
+        throw new Error(rawResult.message || 'GAS 後端執行失敗');
       }
 
-      // 提取行情陣列與股票名稱
-      const rawCandles = result.data || result.candles || [];
-      const stockName = result.stockName || cleanStockCode;
+      // 提取股票名稱與 K 線陣列
+      const stockName = rawResult.stockName || cleanStockCode;
+      const rawCandles = rawResult.data || rawResult.candles || rawResult;
 
       if (!Array.isArray(rawCandles) || rawCandles.length === 0) {
-        throw new Error(`未查詢到股票 [${cleanStockCode}] 的歷史數據，請確認代碼是否正確。`);
+        throw new Error(`查無股票代碼 [${cleanStockCode}] 之有效歷史 K 線數據`);
       }
 
-      // 標準化 K 線數據型別
+      // 資料清洗與欄位型別轉換
       const formattedCandles = normalizeCandleData(rawCandles);
 
-      // 帶入 v3.2 量化引擎執行全額複利回測 (預設本金 100 萬)
-      const backtestResult = engine.runFullCompoundBacktest(formattedCandles, 1000000);
+      // 執行 v3.2 全額複利滾動回測
+      const backtestResult = engine.runFullCompoundBacktest(formattedCandles, 100000);
 
-      // 更新畫面展示
-      updateDashboardUI(cleanStockCode, stockName, backtestResult, formattedCandles);
+      // 更新畫面與儀表板
+      updateStockHeader(cleanStockCode, stockName, formattedCandles);
+      updateDashboardMetrics(backtestResult);
+      renderTradeHistoryTable(backtestResult.tradeHistory);
+      renderCurrentSignalCard(formattedCandles);
 
-      // 連線成功狀態顯示
       if (elStatus) {
-        elStatus.textContent = `🟢 成功同步 [${cleanStockCode} ${stockName}] - 共載入 ${formattedCandles.length} 筆歷史交易日數據`;
+        elStatus.textContent = `🟢 [${cleanStockCode} ${stockName}] 數據同步成功 (共 ${formattedCandles.length} 個交易日)`;
         elStatus.className = 'text-emerald-400 font-medium text-xs';
       }
 
     } catch (error) {
       console.error('GAS API Fetch Error:', error);
       if (elStatus) {
-        elStatus.textContent = `❌ 資料載入失敗：${error.message}`;
+        elStatus.textContent = `❌ 連線/處理失敗：${error.message}`;
         elStatus.className = 'text-rose-400 font-semibold text-xs';
       }
     }
   }
 
   /**
-   * 資料清洗與防呆機制
+   * 3. 資料清洗與規範化 (防呆與轉型)
    */
   function normalizeCandleData(data) {
     return data.map(item => ({
@@ -105,44 +100,58 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /**
-   * 整合渲染儀表板所有區域
+   * 4. 股票抬頭與基礎資訊渲染
    */
-  function updateDashboardUI(stockCode, stockName, result, candles) {
-    // 0. 更新標題區股票名稱與代碼
-    if (elStockTitle) {
-      elStockTitle.innerHTML = `<span class="text-white font-bold">${stockName}</span> <span class="text-sky-400 text-sm font-mono">(${stockCode})</span>`;
-    }
+  function updateStockHeader(stockCode, stockName, candles) {
+    if (!elStockTitle) return;
+    const lastCandle = candles[candles.length - 1];
+    const prevCandle = candles[candles.length - 2] || lastCandle;
+    const change = lastCandle.close - prevCandle.close;
+    const changePct = ((change / prevCandle.close) * 100).toFixed(2);
+    const isUp = change >= 0;
 
-    // 1. 更新資產、報酬率與勝率總覽
-    if (elCapital) elCapital.textContent = `NT$ ${Math.round(result.finalCapital).toLocaleString()}`;
+    elStockTitle.innerHTML = `
+      <div class="flex items-center gap-3">
+        <span class="text-2xl font-black text-white">${stockCode} ${stockName}</span>
+        <span class="text-lg font-bold font-mono ${isUp ? 'text-rose-400' : 'text-emerald-400'}">
+          NT$ ${lastCandle.close.toFixed(2)} (${isUp ? '+' : ''}${changePct}%)
+        </span>
+      </div>
+      <div class="text-xs text-gray-400 mt-1">最新報價日期：${lastCandle.date}</div>
+    `;
+  }
+
+  /**
+   * 5. 頂部資產與統計指標更新
+   */
+  function updateDashboardMetrics(result) {
+    if (elCapital) elCapital.textContent = `NT$ ${result.finalCapital.toLocaleString()}`;
+    
     if (elReturn) {
       const prefix = result.totalReturnPct >= 0 ? '+' : '';
       elReturn.textContent = `${prefix}${result.totalReturnPct}%`;
-      elReturn.className = result.totalReturnPct >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold';
+      elReturn.className = result.totalReturnPct >= 0 
+        ? 'text-emerald-400 font-bold text-2xl' 
+        : 'text-rose-400 font-bold text-2xl';
     }
+
     if (elWinRate) {
       const winRatePct = result.tradeCount > 0 
         ? Math.round((result.winCount / result.tradeCount) * 1000) / 10 
         : 0;
       elWinRate.textContent = `${winRatePct}% (${result.winCount}勝 / ${result.lossCount}敗)`;
     }
-
-    // 2. 渲染交易歷史表格
-    renderTradeHistoryTable(result.tradeHistory);
-
-    // 3. 渲染最新盤後訊號與共振決策卡片
-    renderCurrentSignalCard(candles);
   }
 
   /**
-   * 渲染歷史交易紀錄表格
+   * 6. 渲染歷史系統決策交易紀錄表
    */
   function renderTradeHistoryTable(trades) {
     if (!elTradeTable) return;
     elTradeTable.innerHTML = '';
 
     if (!trades || trades.length === 0) {
-      elTradeTable.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-gray-500">此區間過濾條件下無符合進場之交易紀錄</td></tr>`;
+      elTradeTable.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-gray-500">此觀察區間內無符合之觸發訊號</td></tr>`;
       return;
     }
 
@@ -171,22 +180,21 @@ document.addEventListener('DOMContentLoaded', () => {
         <td class="py-3 px-4 text-sm">
           <span class="px-2.5 py-1 text-xs rounded-md border ${reasonStyle}">${t.sellReason}</span>
         </td>
-        <td class="py-3 px-4 text-sm text-right font-mono text-gray-200">NT$ ${Math.round(t.endCapital).toLocaleString()}</td>
+        <td class="py-3 px-4 text-sm text-right font-mono text-gray-200">NT$ ${t.endCapital.toLocaleString()}</td>
       `;
       elTradeTable.appendChild(row);
     });
   }
 
   /**
-   * 渲染最新即時盤後訊號卡片
+   * 7. 渲染當前盤後訊號與離差指標卡片
    */
   function renderCurrentSignalCard(candles) {
     if (!elCurrentSignal) return;
-    
-    // 透過引擎計算最新幾筆的偏離度與指標
+
     const processed = engine.calculateIndicators(candles);
     const last = processed[processed.length - 1];
-    const prev = processed[processed.length - 2];
+    const prev = processed[processed.length - 2] || last;
     
     const decision = engine.evaluateEntrySignal(last, prev);
 
@@ -200,7 +208,7 @@ document.addEventListener('DOMContentLoaded', () => {
     elCurrentSignal.className = `p-5 rounded-xl border ${borderClass} shadow-xl transition-all`;
     elCurrentSignal.innerHTML = `
       <div class="flex items-center justify-between mb-2">
-        <span class="text-xs font-semibold text-gray-400 uppercase tracking-wider">即時共振決策 (交易日: ${last.date})</span>
+        <span class="text-xs font-semibold text-gray-400 uppercase tracking-wider">即時訊號決策 (資料日期: ${last.date})</span>
         <span class="text-2xl font-black ${decision.isFullPosition ? 'text-emerald-400' : 'text-gray-200'}">${decision.score} 分</span>
       </div>
       <div class="text-xl font-bold text-white mb-3">${decision.signal}</div>
@@ -211,29 +219,33 @@ document.addEventListener('DOMContentLoaded', () => {
         <div><span class="text-gray-500 block mb-1">BDV</span><span class="font-mono text-gray-300">${Math.round(last.bdv)}</span></div>
       </div>
       ${decision.isOverheated ? `
-        <div class="mt-3 text-xs text-amber-300 bg-amber-900/40 p-2 rounded-lg border border-amber-800/80 flex items-center gap-2">
-          <span>⚠️ <strong>高位防衛觸發：</strong>價量指標過熱，系統已封鎖 100% 滿倉建構。</span>
+        <div class="mt-3 text-xs text-amber-300 bg-amber-900/40 p-2.5 rounded-lg border border-amber-800/80 flex items-center gap-2">
+          <span>⚠️ <strong>離差過熱吹哨：</strong>觸發指標保護，系統已自動禁止 100% 重倉追高。</span>
         </div>
       ` : ''}
     `;
   }
 
-  // 3. 事件監聽 (按鈕點擊與 Enter 鍵送出)
+  /**
+   * 8. 事件監聽與綁定
+   */
+  // 點擊查詢/回測按鈕
   if (btnSearch) {
     btnSearch.addEventListener('click', () => {
-      const code = inputStock ? inputStock.value : '2330';
-      fetchAndRenderDashboard(code);
+      const inputCode = elStockInput ? elStockInput.value : '2330';
+      fetchStockAndRender(inputCode);
     });
   }
 
-  if (inputStock) {
-    inputStock.addEventListener('keypress', (e) => {
+  // 輸入框按下 Enter 觸發查詢
+  if (elStockInput) {
+    elStockInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
-        fetchAndRenderDashboard(inputStock.value);
+        fetchStockAndRender(elStockInput.value);
       }
     });
   }
 
-  // 4. 網頁初始載入：預設自動查詢台積電 (2330)
-  fetchAndRenderDashboard('2330');
+  // 9. 頁面首次載入：預設查詢台積電 (2330)
+  fetchStockAndRender('2330');
 });
