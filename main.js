@@ -3,29 +3,20 @@
  */
 
 document.addEventListener('DOMContentLoaded', () => {
-    // 綁定鍵盤 Enter 事件
     const stockInput = document.getElementById('stockInput');
     if (stockInput) {
         stockInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                analyzeStock();
-            }
+            if (e.key === 'Enter') analyzeStock();
         });
     }
-
-    // 初始化載入預設股票 2330
     analyzeStock();
 });
 
-/**
- * 主要分析呼叫入口
- */
 async function analyzeStock() {
     const inputEl = document.getElementById('stockInput');
     const stockCode = inputEl ? inputEl.value.trim() : '2330';
     if (!stockCode) return;
 
-    // 更新 UI 狀態為載入中
     setLoadingState(true);
 
     try {
@@ -39,12 +30,9 @@ async function analyzeStock() {
     }
 }
 
-/**
- * 畫面面板資料繪製
- */
 function renderDashboard(data) {
     const { stockCode, stockName, latest, historicalTrades } = data;
-    const { close, prevClose, volume, prevVolume, sdv, vdv, adv, bdv, deltas, decision } = latest;
+    const { close, prevClose, volume, sdv, vdv, adv, bdv, deltas, decision } = latest;
 
     // 1. 股票標題與簡介
     const stockTitle = document.getElementById('stockTitle');
@@ -109,9 +97,6 @@ function renderDashboard(data) {
     renderHistoryTable(historicalTrades);
 }
 
-/**
- * 渲染單一指標卡片
- */
 function renderIndicatorBox(valueId, statusId, value, type) {
     const valEl = document.getElementById(valueId);
     const statEl = document.getElementById(statusId);
@@ -143,9 +128,6 @@ function renderIndicatorBox(valueId, statusId, value, type) {
     statEl.className = `text-xs mt-2 ${statusColor}`;
 }
 
-/**
- * 繪製 Δ 多週期動能矩陣表
- */
 function renderDeltaMatrix(sdv, vdv, adv, bdv, deltas) {
     const tbody = document.getElementById('deltaMatrixBody');
     if (!tbody) return;
@@ -178,9 +160,6 @@ function getDeltaColor(val) {
     return 'text-slate-400';
 }
 
-/**
- * 繪製歷史買賣成對對沖紀錄表
- */
 function renderHistoryTable(trades) {
     const tbody = document.getElementById('historyTableBody');
     const summary = document.getElementById('historySummary');
@@ -212,9 +191,6 @@ function renderHistoryTable(trades) {
     `).join('');
 }
 
-/**
- * 切換按鈕載入狀態
- */
 function setLoadingState(isLoading) {
     const btn = document.querySelector('button[onclick="analyzeStock()"]');
     if (!btn) return;

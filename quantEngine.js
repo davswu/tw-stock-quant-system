@@ -1,10 +1,5 @@
 /**
  * QuantEngine.js (v2.0 嚴苛波段高勝率引擎)
- * 
- * 重構說明：
- * 1. 門檻提升至 A 級：僅採納 Score >= 85 分強勢共振訊號，徹底剔除 C 級與弱勢雜訊。
- * 2. 波段移動停利：導入 Peak Trailing Stop (最高價回撤 8%) + -5% 硬停損，不再受短線抖動早退。
- * 3. BDV 壓縮爆發過濾：要求通道張力出現擴張轉折 (Δ₁BDV > 0)，鎖定起漲點。
  */
 
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbx5h2Ncq111yq3k6tFffiOS9m0vOBtVywbsVdfZPCHvNbSv0vIGYiC_MimgkZGV3gbP/exec';
@@ -153,12 +148,12 @@ class QuantEngine {
     }
 
     /**
-     * 兩階段決策矩陣 (項次1 & 項次3 優化版)
+     * 兩階段決策矩陣 (A級門檻與BDV張力過濾)
      */
     evaluateDecision(indicators, d1_sdv, d5_sdv, d10_sdv, d1_vdv, d5_vdv, d10_vdv, d1_bdv) {
         const { sdv, vdv, adv, bdv } = indicators;
 
-        // 【項次 3 優化】Stage 1 硬性過濾：新增 BDV 壓縮爆發 (d1_bdv >= -1.0) 與標準位階過濾
+        // Stage 1 硬性過濾：包含 BDV 壓縮爆發 (d1_bdv >= -1.0)
         const passFilter = (sdv >= 50) && (bdv >= 38) && (adv <= 75) && (d1_bdv >= -1.0);
         if (!passFilter) {
             return {
@@ -172,22 +167,15 @@ class QuantEngine {
 
         // Stage 2 權重評分 (總分 100)
         let score = 0;
-
-        // 1. 位階與資金絕對強度 (30%)
         if (sdv >= 58) score += 15;
         if (vdv >= 58) score += 15;
-
-        // 2. 短線與單日動能爆發 Δ₁ / Δ₅ (40%)
         if (d1_sdv > 1.0) score += 10;
         if (d5_sdv > 2.0) score += 10;
         if (d1_vdv > 1.0) score += 10;
         if (d5_vdv > 2.0) score += 10;
-
-        // 3. 中線結構共振 Δ₁₀ (30%)
         if (d10_sdv > 0) score += 15;
         if (d10_vdv > 0) score += 15;
 
-        // 【項次 1 優化】僅放行 A 級強勢發射 (Score >= 85)，其餘一律觀望不開倉
         if (score >= 85) {
             return {
                 badge: "A級強勢買入",
@@ -208,7 +196,7 @@ class QuantEngine {
     }
 
     /**
-     * 歷史交易紀錄擷取 (項次 2 優化：波段移動停利與硬停損機制)
+     * 歷史交易紀錄擷取 (波段移動停利與硬停損)
      */
     extractHistoricalTrades(series) {
         const trades = [];
@@ -221,7 +209,6 @@ class QuantEngine {
             const close = item.close;
 
             if (!inPosition) {
-                // 【項次 1】僅限 A 級門檻 (Score >= 85) 觸發進場
                 const isBuySignal = item.decision.score >= 85;
                 if (isBuySignal) {
                     inPosition = true;
@@ -230,22 +217,17 @@ class QuantEngine {
                         price: close,
                         signal: item.decision.badge
                     };
-                    highestPrice = close; // 初始化最高價
-                }
-            } else {
-                // 追蹤持倉期間的最高價位
-                if (close > highestPrice) {
                     highestPrice = close;
                 }
+            } else {
+                if (close > highestPrice) highestPrice = close;
 
-                // 【項次 2】計算波段移動停利線與硬停損線
-                const hardStopPrice = buyEntry.price * 0.95; // -5% 硬性停損
+                const hardStopPrice = buyEntry.price * 0.95; // -5% 硬停損
                 const trailingStopPrice = highestPrice * 0.92; // 最高點回撤 8% 移動停利
-                const isStructuralBreak = item.sdv < 42; // 多頭結構徹底毀損
+                const isStructuralBreak = item.sdv < 42;
 
-                // 判斷出場條件
                 const isHardStop = close < hardStopPrice;
-                const isTrailingStop = (highestPrice > buyEntry.price * 1.05) && (close < trailingStopPrice); // 獲利>5% 後啟動移動停利
+                const isTrailingStop = (highestPrice > buyEntry.price * 1.05) && (close < trailingStopPrice);
                 const isExitSignal = isHardStop || isTrailingStop || isStructuralBreak;
 
                 if (isExitSignal || i === series.length - 1) {
@@ -334,5 +316,4 @@ class QuantEngine {
     }
 }
 
-// 暴露全域單例引擎
 window.quantEngine = new QuantEngine();
