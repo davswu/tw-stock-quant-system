@@ -1,5 +1,5 @@
 /**
- * Main.js - DOM 視覺化 UI 渲染與事件控制中心
+ * main.js - DOM 視覺化 UI 渲染與事件控制中心
  */
 
 document.addEventListener('DOMContentLoaded', () => {
