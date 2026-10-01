@@ -151,6 +151,7 @@ function renderDeltaMatrix(sdv, vdv, adv, bdv, deltas) {
 }
 
 function formatDelta(val) {
+    if (val === undefined || val === null) return '--';
     return (val > 0 ? `+${val.toFixed(1)}` : val.toFixed(1));
 }
 

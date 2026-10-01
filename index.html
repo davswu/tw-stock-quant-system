@@ -37,7 +37,7 @@
                         <span class="text-sm text-slate-300 font-normal mt-1">--</span>
                     </div>
                 </div>
-                <p id="decisionDesc" class="text-sm text-slate-400 mt-3 leading-relaxed">連線 GAS API 中...</p>
+                <p id="decisionDesc" class="text-sm text-slate-400 mt-3 leading-relaxed">正在讀取量化引擎數據...</p>
             </div>
 
             <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
@@ -170,7 +170,7 @@
 
     </div>
 
-    <!-- 載入量化計算引擎與主程式 (注意順序：先載入引擎，再載入 UI 控制) -->
+    <!-- 先載入量化計算引擎，再載入 UI 控制器 -->
     <script src="quantEngine.js"></script>
     <script src="main.js"></script>
 </body>
