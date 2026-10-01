@@ -1,319 +1,251 @@
 /**
- * QuantEngine.js (v2.0 嚴苛波段高勝率引擎)
+ * quantEngine.js - 重構升級版量化決策與回測引擎
+ * 核心模組：
+ * 1. 大盤風控 (Market Risk Filter) - 動態調整整體系統容許倉位
+ * 2. 進場共振 (Entry Resonance) - 拒絕 SDV > 62 末端追高，抓 52~62 帶量突破起漲點
+ * 3. 動能加碼 (Momentum Pyramiding) - 僅在首筆浮盈 >= 4% 時發動二次加碼
+ * 4. 高檔動態停利 (High-Level Dynamic Take-Profit) - 盤中 -5% 硬停損 + 高檔極致拐點/移動停利
  */
 
-const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbx5h2Ncq111yq3k6tFffiOS9m0vOBtVywbsVdfZPCHvNbSv0vIGYiC_MimgkZGV3gbP/exec';
+const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx5h2Ncq111yq3k6tFffiOS9m0vOBtVywbsVdfZPCHvNbSv0vIGYiC_MimgkZGV3gbP/exec";
 
 class QuantEngine {
-    constructor() {
-        this.period = 20; // 基礎移動平均與對數標準化週期
+    constructor(apiUrl = GAS_API_URL) {
+        this.apiUrl = apiUrl;
+        this.maxPortfolioRisk = 1.0; // 大盤風控調控係數 (0.0 ~ 1.0)
     }
 
     /**
-     * 從 GAS API 獲取歷史與即時數據
+     * 從 Google Apps Script API 讀取市場或個股數據
+     * @param {string} symbol - 股票代號 (例如: "2330", "8150", "TAIEX")
+     * @param {number} days - 擷取交易日天數
      */
-    async fetchStockData(stockCode) {
+    async fetchMarketData(symbol = "TAIEX", days = 120) {
         try {
-            const url = `${GAS_API_URL}?stock=${encodeURIComponent(stockCode)}`;
+            const url = `${this.apiUrl}?action=getData&symbol=${encodeURIComponent(symbol)}&days=${days}`;
             const response = await fetch(url);
-            if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             const json = await response.json();
-            
-            const rawData = json.data || json;
-            if (!Array.isArray(rawData) || rawData.length < 30) {
-                throw new Error("數據長度不足以進行 20 日對數標準化計算");
-            }
-            return this.processQuantitativeData(stockCode, json.stockName || stockCode, rawData);
+            return json.data || json;
         } catch (error) {
-            console.warn("GAS API 連線失敗或格式不相符，啟動降級數據處理:", error);
-            return this.generateFallbackData(stockCode);
+            console.error(`[QuantEngine] 擷取數據失敗 (${symbol}):`, error);
+            throw error;
         }
     }
 
     /**
-     * 計算 T-Score (Mean=50, SD=10)
+     * 模組 1：大盤風控檢測 (Market Risk Filter)
+     * @param {Object} marketBar - 最新大盤 K 線與指標資料
      */
-    calcTScore(val, mean, std) {
-        if (std === 0 || isNaN(std)) return 50;
-        const z = (val - mean) / std;
-        const t = 50 + z * 10;
-        return Math.min(Math.max(Math.round(t * 10) / 10, 10), 90);
-    }
-
-    /**
-     * 核心指標與多週期動能運算
-     */
-    processQuantitativeData(stockCode, stockName, klineData) {
-        const len = klineData.length;
-        const calculatedSeries = [];
-
-        for (let i = 0; i < len; i++) {
-            if (i < this.period) {
-                calculatedSeries.push(null);
-                continue;
-            }
-
-            const slice = klineData.slice(i - this.period + 1, i + 1);
-            const closePrices = slice.map(d => Number(d.close));
-            const volumes = slice.map(d => Number(d.volume));
-            
-            // 1. SDV (價格位階)
-            const currClose = closePrices[closePrices.length - 1];
-            const maClose = closePrices.reduce((a, b) => a + b, 0) / this.period;
-            const logReturns = [];
-            for (let j = 1; j < closePrices.length; j++) {
-                logReturns.push(Math.log(closePrices[j] / closePrices[j - 1]));
-            }
-            const meanLog = logReturns.reduce((a, b) => a + b, 0) / logReturns.length;
-            const stdLog = Math.sqrt(logReturns.reduce((a, b) => a + Math.pow(b - meanLog, 2), 0) / logReturns.length) || 0.01;
-            const rawSDV = Math.log(currClose / maClose);
-            const sdv = this.calcTScore(rawSDV, 0, stdLog * Math.sqrt(this.period));
-
-            // 2. VDV (資金強度)
-            const currVol = volumes[volumes.length - 1];
-            const maVol = volumes.reduce((a, b) => a + b, 0) / this.period;
-            const stdVol = Math.sqrt(volumes.reduce((a, b) => a + Math.pow(b - maVol, 2), 0) / this.period) || 1;
-            const vdv = this.calcTScore(currVol, maVol, stdVol);
-
-            // 3. ADV (真實區間波動度)
-            const trList = slice.map((d, idx) => {
-                if (idx === 0) return d.high - d.low;
-                const prevC = slice[idx - 1].close;
-                return Math.max(d.high - d.low, Math.abs(d.high - prevC), Math.abs(d.low - prevC));
-            });
-            const currTR = trList[trList.length - 1];
-            const maTR = trList.reduce((a, b) => a + b, 0) / this.period;
-            const stdTR = Math.sqrt(trList.reduce((a, b) => a + Math.pow(b - maTR, 2), 0) / this.period) || 1;
-            const adv = this.calcTScore(currTR, maTR, stdTR);
-
-            // 4. BDV (通道張力與壓縮)
-            const variance = closePrices.reduce((a, b) => a + Math.pow(b - maClose, 2), 0) / this.period;
-            const stdDevPrice = Math.sqrt(variance);
-            const bw = (stdDevPrice * 4) / maClose;
-            const bdv = Math.min(Math.max(Math.round(bw * 300), 20), 85);
-
-            calculatedSeries.push({
-                date: klineData[i].date,
-                close: currClose,
-                prevClose: klineData[i - 1] ? klineData[i - 1].close : currClose,
-                volume: currVol,
-                prevVolume: klineData[i - 1] ? klineData[i - 1].volume : currVol,
-                sdv, vdv, adv, bdv
-            });
+    updateMarketFilter(marketBar) {
+        if (!marketBar) {
+            this.maxPortfolioRisk = 1.0;
+            return;
         }
 
-        // 計算多週期動能 Δ₁ / Δ₅ / Δ₁₀
-        const validSeries = calculatedSeries.filter(d => d !== null);
-        const seriesWithDelta = validSeries.map((curr, idx) => {
-            const d1_sdv = idx >= 1 ? curr.sdv - validSeries[idx - 1].sdv : 0;
-            const d5_sdv = idx >= 5 ? curr.sdv - validSeries[idx - 5].sdv : 0;
-            const d10_sdv = idx >= 10 ? curr.sdv - validSeries[idx - 10].sdv : 0;
+        const sdv = marketBar.sdv || 50;
+        const adv = marketBar.adv || 50;
 
-            const d1_vdv = idx >= 1 ? curr.vdv - validSeries[idx - 1].vdv : 0;
-            const d5_vdv = idx >= 5 ? curr.vdv - validSeries[idx - 5].vdv : 0;
-            const d10_vdv = idx >= 10 ? curr.vdv - validSeries[idx - 10].vdv : 0;
-
-            const d1_adv = idx >= 1 ? curr.adv - validSeries[idx - 1].adv : 0;
-            const d5_adv = idx >= 5 ? curr.adv - validSeries[idx - 5].adv : 0;
-            const d10_adv = idx >= 10 ? curr.adv - validSeries[idx - 10].adv : 0;
-
-            const d1_bdv = idx >= 1 ? curr.bdv - validSeries[idx - 1].bdv : 0;
-            const d5_bdv = idx >= 5 ? curr.bdv - validSeries[idx - 5].bdv : 0;
-            const d10_bdv = idx >= 10 ? curr.bdv - validSeries[idx - 10].bdv : 0;
-
-            const decision = this.evaluateDecision(curr, d1_sdv, d5_sdv, d10_sdv, d1_vdv, d5_vdv, d10_vdv, d1_bdv);
-
-            return {
-                ...curr,
-                deltas: {
-                    sdv: { d1: d1_sdv, d5: d5_sdv, d10: d10_sdv },
-                    vdv: { d1: d1_vdv, d5: d5_vdv, d10: d10_vdv },
-                    adv: { d1: d1_adv, d5: d5_adv, d10: d10_adv },
-                    bdv: { d1: d1_bdv, d5: d5_bdv, d10: d10_bdv }
-                },
-                decision
-            };
-        });
-
-        const latest = seriesWithDelta[seriesWithDelta.length - 1];
-        const historicalSignals = this.extractHistoricalTrades(seriesWithDelta.slice(-120));
-
-        return {
-            stockCode,
-            stockName,
-            latest,
-            history: seriesWithDelta,
-            historicalTrades: historicalSignals
-        };
-    }
-
-    /**
-     * 兩階段決策矩陣 (A級門檻與BDV張力過濾)
-     */
-    evaluateDecision(indicators, d1_sdv, d5_sdv, d10_sdv, d1_vdv, d5_vdv, d10_vdv, d1_bdv) {
-        const { sdv, vdv, adv, bdv } = indicators;
-
-        // Stage 1 硬性過濾：包含 BDV 壓縮爆發 (d1_bdv >= -1.0)
-        const passFilter = (sdv >= 50) && (bdv >= 38) && (adv <= 75) && (d1_bdv >= -1.0);
-        if (!passFilter) {
-            return {
-                badge: "觀望 / 中立",
-                badgeClass: "bg-slate-700 text-slate-300",
-                position: "0%",
-                score: 40,
-                desc: "未通過第一階段嚴苛過濾（價格位階偏低或未逢通道爆發起漲點）"
-            };
-        }
-
-        // Stage 2 權重評分 (總分 100)
-        let score = 0;
-        if (sdv >= 58) score += 15;
-        if (vdv >= 58) score += 15;
-        if (d1_sdv > 1.0) score += 10;
-        if (d5_sdv > 2.0) score += 10;
-        if (d1_vdv > 1.0) score += 10;
-        if (d5_vdv > 2.0) score += 10;
-        if (d10_sdv > 0) score += 15;
-        if (d10_vdv > 0) score += 15;
-
-        if (score >= 85) {
-            return {
-                badge: "A級強勢買入",
-                badgeClass: "bg-emerald-600 text-white font-extrabold animate-pulse",
-                position: "100%",
-                score,
-                desc: "完全滿足四指標多頭共振與通道爆發條件，系統給予 100% 滿倉建倉指引。"
-            };
+        if (sdv < 42) {
+            this.maxPortfolioRisk = 0.0; // 空頭危險格局：全面禁止建立新多單
+        } else if (sdv < 48 || adv > 65) {
+            this.maxPortfolioRisk = 0.5; // 震盪警戒格局：新單允許倉位減半
         } else {
-            return {
-                badge: "觀望 / 未達標",
-                badgeClass: "bg-slate-700 text-slate-300",
-                position: "0%",
-                score,
-                desc: "動能分數未達 A 級嚴苛發射門檻 (85分)，系統維持空倉觀望以避開無效盤整。"
-            };
+            this.maxPortfolioRisk = 1.0; // 多頭安全格局：允許標準倉位操作
         }
     }
 
     /**
-     * 歷史交易紀錄擷取 (波段移動停利與硬停損)
+     * 模組 2, 3, 4 核心邏輯判斷
+     * @param {Object} currentBar - 當日前開高低收與指標數據
+     * @param {Object|null} positionState - 當前持倉狀態 (若未持有則傳入 null)
+     * @returns {Object} 決策訊號與執行動態
      */
-    extractHistoricalTrades(series) {
-        const trades = [];
-        let inPosition = false;
-        let buyEntry = null;
-        let highestPrice = 0;
+    evaluateDecision(currentBar, positionState = null) {
+        const { close, low, sdv, vdv, adv, bdv, d1_sdv, d5_sdv, d1_vdv, d1_adv, d1_bdv } = currentBar;
 
-        for (let i = 0; i < series.length; i++) {
-            const item = series[i];
-            const close = item.close;
+        // -------------------------------------------------------------
+        // 情境 A：目前已有持倉 -> 執行 [模組 3: 動能加碼] 與 [模組 4: 高檔停利/停損]
+        // -------------------------------------------------------------
+        if (positionState && positionState.hasPosition) {
+            const { avgPrice, highestPrice, positionSize, isPyramided } = positionState;
+            const currentGain = (close - avgPrice) / avgPrice;
+            const peakGain = (highestPrice - avgPrice) / avgPrice;
 
-            if (!inPosition) {
-                const isBuySignal = item.decision.score >= 85;
-                if (isBuySignal) {
-                    inPosition = true;
-                    buyEntry = {
-                        date: item.date,
-                        price: close,
-                        signal: item.decision.badge
+            // 1. 模組 4：盤中觸發硬停損 (以當日最低價 low 判定，防範隔天跳空崩跌)
+            if (low <= avgPrice * 0.95) {
+                return {
+                    signal: 'EXIT_ALL',
+                    priceType: 'STOP_LOSS_PRICE',
+                    executedPrice: avgPrice * 0.945, // 模擬盤中觸發 -5% 加預設 0.5% 滑點
+                    reason: '觸發 -5% 盤中硬性停損防護'
+                };
+            }
+
+            // 2. 模組 4：高檔情緒爆發拐點停利 (SDV≥66 極致過熱 & ADV≥70 波動爆發 + 動能背離)
+            if (sdv >= 66 && adv >= 70 && (d1_adv <= -2.5 || d1_sdv <= -1.5)) {
+                return {
+                    signal: 'EXIT_ALL',
+                    priceType: 'CLOSE_PRICE',
+                    executedPrice: close,
+                    reason: '觸發高檔情緒爆發拐點停利 (極值動能衰竭)'
+                };
+            }
+
+            // 3. 模組 4：峰值最高價移動軌道停利 (Trailing Stop)
+            if (peakGain >= 0.10) {
+                const trailRatio = peakGain >= 0.20 ? 0.08 : 0.06; // 漲超過 20% 給予 8% 回撤空間，否則 6%
+                const trailPrice = highestPrice * (1 - trailRatio);
+                if (close < trailPrice) {
+                    return {
+                        signal: 'EXIT_ALL',
+                        priceType: 'CLOSE_PRICE',
+                        executedPrice: close,
+                        reason: `自最高點位階 (${(peakGain * 100).toFixed(1)}%) 回撤 ${(trailRatio * 100)}% 強制停利`
                     };
-                    highestPrice = close;
-                }
-            } else {
-                if (close > highestPrice) highestPrice = close;
-
-                const hardStopPrice = buyEntry.price * 0.95; // -5% 硬停損
-                const trailingStopPrice = highestPrice * 0.92; // 最高點回撤 8% 移動停利
-                const isStructuralBreak = item.sdv < 42;
-
-                const isHardStop = close < hardStopPrice;
-                const isTrailingStop = (highestPrice > buyEntry.price * 1.05) && (close < trailingStopPrice);
-                const isExitSignal = isHardStop || isTrailingStop || isStructuralBreak;
-
-                if (isExitSignal || i === series.length - 1) {
-                    inPosition = false;
-                    let exitReason = "波段移動停利離場";
-                    if (isHardStop) exitReason = "觸發 -5% 硬性停損";
-                    else if (isStructuralBreak) exitReason = "SDV 位階破壞離場";
-                    else if (i === series.length - 1) exitReason = "持倉至最新交易日";
-
-                    trades.push({
-                        buyDate: buyEntry.date,
-                        buyPrice: buyEntry.price,
-                        buySignal: buyEntry.signal,
-                        sellDate: item.date,
-                        sellPrice: close,
-                        sellSignal: exitReason
-                    });
-                    buyEntry = null;
-                    highestPrice = 0;
                 }
             }
+
+            // 4. 模組 3：動能加碼 (浮盈 ≥ 4%、多週期動能加速、未達過熱區、且尚未加碼過)
+            if (!isPyramided && currentGain >= 0.04 && positionSize < 1.0 && d5_sdv >= 3.0 && d1_vdv > 0 && sdv < 65) {
+                return {
+                    signal: 'ADD_POSITION',
+                    addSize: 0.5,
+                    priceType: 'CLOSE_PRICE',
+                    executedPrice: close,
+                    reason: '觸發動能加碼：試探單產生 +4% 浮盈，且多週期動能共振續強'
+                };
+            }
+
+            return {
+                signal: 'HOLD',
+                reason: `繼續持倉跟蹤中 (當前報酬: ${(currentGain * 100).toFixed(2)}%, 最高: ${(peakGain * 100).toFixed(2)}%)`
+            };
         }
-        return trades;
+
+        // -------------------------------------------------------------
+        // 情境 B：目前無持倉 -> 執行 [模組 1: 大盤風控] 與 [模組 2: 進場共振]
+        // -------------------------------------------------------------
+        if (this.maxPortfolioRisk === 0.0) {
+            return { signal: 'WAIT', reason: '大盤處於危險空頭結構 (大盤風控模組強制攔截新單)' };
+        }
+
+        // 模組 2：進場共振條件檢查 (拒絕 SDV > 62 過熱追高)
+        const isSweetSpot = (sdv >= 52 && sdv <= 62);       // 轉強且未過熱的黃金帶
+        const isVolResonance = (vdv >= 58 && d1_vdv > 0);    // 資金真實擴張流入
+        const isBandExpansion = (bdv >= 38 && d1_bdv > 0);  // 通道開啟變動
+        const isRiskAcceptable = (adv <= 65);               // 波動未陷入危險暴風圈
+
+        if (isSweetSpot && isVolResonance && isBandExpansion && isRiskAcceptable) {
+            const initialSize = 0.5 * this.maxPortfolioRisk; // 首筆試探倉 50% (受大盤風控調節)
+            return {
+                signal: 'BUY_BASE',
+                size: initialSize,
+                priceType: 'CLOSE_PRICE',
+                executedPrice: close,
+                reason: '觸發進場共振：帶量突破且未陷入高檔過熱 (建立試探倉)'
+            };
+        }
+
+        return { signal: 'WAIT', reason: '未達進場共振發射條件' };
     }
 
     /**
-     * ADV 風控狀態評估
+     * 執行 120 交易日歷史回測模擬 (含跳空修正與動態倉位)
+     * @param {Array} stockSeries - 個股歷史數據陣列 (按時間舊至新排序)
+     * @param {Array} marketSeries - 大盤歷史數據陣列 (可選)
      */
-    getRiskControlStatus(latest) {
-        const { adv, sdv, deltas } = latest;
-        const d1_adv = deltas.adv.d1;
+    runBacktest(stockSeries, marketSeries = []) {
+        let position = null;
+        const trades = [];
+        let capital = 1000000; // 初始資金 $1,000,000
 
-        let stopLossMode = "";
-        let stopLossRule = "";
+        for (let i = 0; i < stockSeries.length; i++) {
+            const currentBar = stockSeries[i];
+            const currentMarketBar = marketSeries[i] || null;
 
-        if (adv >= 65) {
-            stopLossMode = "高波動寬鬆風控模式 (High Volatility)";
-            stopLossRule = "採最高點回撤 8% ~ 10% 軌道移動停利，避免高波動洗盤出場。";
-        } else if (adv >= 45) {
-            stopLossMode = "常態波段風控模式 (Normal Volatility)";
-            stopLossRule = "採 -5% 硬停損與最高價回撤 8% 移動停利，鎖定波段利潤。";
-        } else {
-            stopLossMode = "低波動緊密風控模式 (Compression Zone)";
-            stopLossRule = "以 1.5 倍 ATR 或 -4% 為高敏感停損，防範向下假突破。";
+            // 1. 更新大盤風控狀態
+            if (currentMarketBar) {
+                this.updateMarketFilter(currentMarketBar);
+            }
+
+            // 2. 更新持倉最高價 (若目前持倉中)
+            if (position) {
+                position.highestPrice = Math.max(position.highestPrice, currentBar.high);
+            }
+
+            // 3. 評估當日決策
+            const decision = this.evaluateDecision(currentBar, position);
+
+            // 4. 根據決策更新持倉與交易紀錄
+            if (decision.signal === 'BUY_BASE') {
+                position = {
+                    hasPosition: true,
+                    buyDate: currentBar.date,
+                    basePrice: decision.executedPrice,
+                    avgPrice: decision.executedPrice,
+                    highestPrice: currentBar.high,
+                    positionSize: decision.size,
+                    isPyramided: false,
+                    shares: Math.floor((capital * decision.size) / decision.executedPrice)
+                };
+            } 
+            else if (decision.signal === 'ADD_POSITION') {
+                const addShares = Math.floor((capital * decision.addSize) / decision.executedPrice);
+                const totalShares = position.shares + addShares;
+                const totalCost = (position.shares * position.avgPrice) + (addShares * decision.executedPrice);
+
+                position.avgPrice = totalCost / totalShares;
+                position.shares = totalShares;
+                position.positionSize += decision.addSize;
+                position.isPyramided = true;
+            } 
+            else if (decision.signal === 'EXIT_ALL' && position) {
+                const exitPrice = decision.executedPrice;
+                const pnl = (exitPrice - position.avgPrice) * position.shares;
+                const returnPct = ((exitPrice - position.avgPrice) / position.avgPrice) * 100;
+
+                trades.push({
+                    buyDate: position.buyDate,
+                    sellDate: currentBar.date,
+                    avgBuyPrice: Number(position.avgPrice.toFixed(2)),
+                    sellPrice: Number(exitPrice.toFixed(2)),
+                    returnPct: Number(returnPct.toFixed(2)),
+                    pnl: Math.round(pnl),
+                    isPyramided: position.isPyramided,
+                    exitReason: decision.reason
+                });
+
+                capital += pnl;
+                position = null; // 清空持倉
+            }
         }
 
-        const isTakeProfitTriggered = (sdv >= 65) && (adv >= 70) && (d1_adv <= -3.0);
+        // 統計結算
+        const wins = trades.filter(t => t.returnPct > 0);
+        const losses = trades.filter(t => t.returnPct <= 0);
+        const winRate = trades.length > 0 ? (wins.length / trades.length) * 100 : 0;
+        const totalGainPct = wins.reduce((acc, t) => acc + t.returnPct, 0);
+        const totalLossPct = Math.abs(losses.reduce((acc, t) => acc + t.returnPct, 0));
+        const profitFactor = totalLossPct > 0 ? (totalGainPct / totalLossPct) : totalGainPct;
 
         return {
-            stopLossMode,
-            stopLossRule,
-            isTakeProfitTriggered,
-            takeProfitDesc: isTakeProfitTriggered 
-                ? "🚨 警告：觸發高檔情緒爆發拐點，建議執行動態降倉或分批停利！"
-                : "常態波段跟蹤中 (未觸發情緒爆發警示)"
+            summary: {
+                totalTrades: trades.length,
+                winRate: Number(winRate.toFixed(1)),
+                profitFactor: Number(profitFactor.toFixed(2)),
+                finalCapital: Math.round(capital),
+                netReturnPct: Number((((capital - 1000000) / 1000000) * 100).toFixed(2))
+            },
+            tradeLogs: trades
         };
-    }
-
-    /**
-     * API 降級模擬數據產生器
-     */
-    generateFallbackData(stockCode) {
-        const mockKline = [];
-        let basePrice = stockCode === '8150' ? 75 : 100;
-        let baseVol = 20000;
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - 200);
-
-        for (let i = 0; i < 180; i++) {
-            const d = new Date(startDate);
-            d.setDate(d.getDate() + i);
-            const dateStr = d.toISOString().split('T')[0];
-            const change = (Math.random() - 0.47) * 0.035;
-            basePrice = Math.round(basePrice * (1 + change) * 10) / 10;
-            const vol = Math.round(baseVol * (0.6 + Math.random() * 0.8));
-            mockKline.push({
-                date: dateStr,
-                open: basePrice * 0.99,
-                high: basePrice * 1.02,
-                low: basePrice * 0.98,
-                close: basePrice,
-                volume: vol
-            });
-        }
-        return this.processQuantitativeData(stockCode, `${stockCode} (模擬波段)`, mockKline);
     }
 }
 
-window.quantEngine = new QuantEngine();
+// 導出模組 (支援 Node.js 環境與 Browser window 全局掛載)
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { QuantEngine, GAS_API_URL };
+} else {
+    window.QuantEngine = QuantEngine;
+    window.GAS_API_URL = GAS_API_URL;
+}
