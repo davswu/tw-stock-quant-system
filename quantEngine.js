@@ -1,34 +1,30 @@
 /**
- * QuantDecisionEngine v10.7
- * 三軌進場系統（軌1 常規訊號 → 軌3 盤整突破 → 軌2 早期試單）
- * + 動能加碼（三次）+ 四層出場判斷
- *
- * 對外 API：
- *   - getLatestAnalysis(initCapital)
- *   - getHistoricalDecisionSignals(days, initCapital)
+ * QuantDecisionEngine v10.7.2 終版
+ * 包含：對數 T-Score (SDV, VDV, ADV, BDV) + 多週期動能 (Δ₁ / Δ₅ / Δ₁₀)
+ * 三軌進場系統 + 動能加碼 + 四層出場 + ADV 動態移動風控樞紐
  */
 class QuantDecisionEngine {
     constructor(rawData) {
         this.rawData = rawData || [];
         this.tScores = [];
 
-        // ============ 全域參數 ============
-        this.WINDOW = 30;
-        this.ATR_PERIOD = 14;
-        this.BB_PERIOD = 20;
-        this.COMMISSION = 0.001425;
-        this.TAX = 0.003;
+        // ============ 全域參數量化設定 ============
+        this.WINDOW = 30;         // T-Score 滾動視窗
+        this.ATR_PERIOD = 14;     // ATR 週期
+        this.BB_PERIOD = 20;      // 帶寬週期
+        this.COMMISSION = 0.001425; // 交易手續費率
+        this.TAX = 0.003;         // 證券交易稅率
 
-        // 進場共振門檻
+        // 進場門檻
         this.A_GRADE = 70;
         this.B_GRADE = 50;
         this.EXTREME_GRADE = 45;
-        this.HIGH_SDV_FORBID = 75.0;
+        this.HIGH_SDV_FORBID = 75.0; // 高位禁買線
         this.HIGH_SDV_LOOKBACK = 5;
         this.INIT_A_SIZE = 0.70;
         this.INIT_B_SIZE = 0.50;
 
-        // 加碼
+        // 加碼機制
         this.ADD1_RET = 5.0;
         this.ADD1_SIZE_A = 0.15;
         this.ADD1_SIZE_B = 0.25;
@@ -38,7 +34,7 @@ class QuantDecisionEngine {
         this.ADD3_RET = 20.0;
         this.ADD3_SIZE = 0.10;
 
-        // 時間停損 / 冷卻期
+        // 時間停損與冷卻期
         this.TIME_STOP_DAYS = 20;
         this.TIME_STOP_MIN_RET = 8.0;
         this.COOLDOWN_1 = 3;
@@ -46,12 +42,12 @@ class QuantDecisionEngine {
         this.COOLDOWN_3 = 12;
         this.EARLY_MUTEX_DAYS = 3;
 
-        // 軌3 Squeeze
+        // 軌3：Squeeze 突破
         this.SQUEEZE_BDV_MAX = 40;
         this.SQUEEZE_VOL_RATIO = 1.15;
         this.SQUEEZE_SIZE = 0.30;
 
-        // 軌2 早期試單
+        // 軌2：早期試單
         this.EARLY_MA20_DIST = 0.015;
         this.EARLY_SDV_MIN = 48;
         this.EARLY_SDV_MAX = 58;
@@ -62,7 +58,7 @@ class QuantDecisionEngine {
     }
 
     // ============================================================
-    // 步驟 1：衍生指標（ATR / Bandwidth / MA20 / 前5日均量）
+    // 步驟 1：衍生指標計算 (ATR / Bandwidth / MA20 / 前5日均量)
     // ============================================================
     calculateDerivedMetrics() {
         const len = this.rawData.length;
@@ -79,7 +75,7 @@ class QuantDecisionEngine {
             }
         }
 
-        // ATR(14)
+        // ATR (14)
         const atrs = [];
         for (let i = 0; i < len; i++) {
             if (i < 13) atrs.push(null);
@@ -89,7 +85,7 @@ class QuantDecisionEngine {
             }
         }
 
-        // Bandwidth(20,2)
+        // Bandwidth (20, 2)
         const bws = [];
         for (let i = 0; i < len; i++) {
             if (i < 19) bws.push(null);
@@ -112,7 +108,7 @@ class QuantDecisionEngine {
             }
         }
 
-        // 前5日均量（不含當日）
+        // 前5日均量 (不含當日)
         const vol5s = [];
         for (let i = 0; i < len; i++) {
             if (i < 5) vol5s.push(null);
@@ -131,7 +127,7 @@ class QuantDecisionEngine {
     }
 
     // ============================================================
-    // 步驟 2：T-Score + Δ 動能
+    // 步驟 2：計算對數 T-Score 與 Δ 多週期動能
     // ============================================================
     calculateTScores() {
         this.calculateDerivedMetrics();
@@ -176,7 +172,7 @@ class QuantDecisionEngine {
             });
         }
 
-        // 計算 Δ
+        // 計算 Δ 矩陣
         const result = [];
         for (let i = 0; i < raw.length; i++) {
             const t = raw[i];
@@ -196,7 +192,7 @@ class QuantDecisionEngine {
     }
 
     // ============================================================
-    // 排除條款 E1~E4
+    // 排除條款 E1 ~ E4
     // ============================================================
     isExcluded(t) {
         if (t.SDV >= 80) return 'E1';
@@ -206,9 +202,7 @@ class QuantDecisionEngine {
         return null;
     }
 
-    // ============================================================
-    // 常規訊號檢查（供早期試單互斥使用）
-    // ============================================================
+    // 檢查常規進場訊號（供早期試單互斥驗證）
     checkRegularSignal(ts, i) {
         const r = ts[i];
         if (!r || r.SDV === undefined || r.d10_SDV === undefined) return false;
@@ -246,17 +240,16 @@ class QuantDecisionEngine {
             if (r.d1_BDV >= 0) s += 10;
             if (s >= 50) return true;
         }
-
         return false;
     }
 
     // ============================================================
-    // 三軌進場判斷（v10.7 順序：軌1 → 軌3 → 軌2）
+    // 三軌進場判斷（軌1 -> 軌3 -> 軌2）
     // ============================================================
     evaluateEntry(ts, i) {
         const r = ts[i];
 
-        // 高位禁買
+        // 高位禁買線
         let recentSdvMax = 0;
         for (let k = Math.max(0, i - this.HIGH_SDV_LOOKBACK); k <= i; k++) {
             if (ts[k] && ts[k].SDV > recentSdvMax) recentSdvMax = ts[k].SDV;
@@ -358,7 +351,7 @@ class QuantDecisionEngine {
                      grade: 'S', size: this.SQUEEZE_SIZE, price: r.close };
         }
 
-        // ===== 軌道 2：早期試單（互斥檢查）=====
+        // ===== 軌道 2：早期試單 (互斥檢查) =====
         if (r.ma20) {
             const dist = Math.abs(r.close - r.ma20) / r.ma20;
             if (dist < this.EARLY_MA20_DIST
@@ -381,7 +374,7 @@ class QuantDecisionEngine {
     }
 
     // ============================================================
-    // 加碼判斷
+    // 加碼邏輯評估
     // ============================================================
     evaluateAdd(t, position, curRet) {
         const g = position.entryGrade || 'B';
@@ -420,7 +413,7 @@ class QuantDecisionEngine {
     }
 
     // ============================================================
-    // 出場判斷（四層）
+    // 出場邏輯評估 (四層)
     // ============================================================
     evaluateExit(t, position, i, ts) {
         const avg = position.avgPrice;
@@ -435,7 +428,7 @@ class QuantDecisionEngine {
         const stop = avg - m * t.atr;
         if (t.low <= stop) {
             return { executedPrice: Math.max(stop, t.low),
-                     reason: `ATR停損 (${m}×ATR)`, highest };
+                     reason: `ATR動態停損 (${m}×ATR)`, highest };
         }
 
         // 第 2 層：分階段移動停利
@@ -450,7 +443,7 @@ class QuantDecisionEngine {
                      reason: `移動停利 (當前+${curRet.toFixed(1)}%)`, highest };
         }
 
-        // 第 3 層：訊號反轉（穿越條件）
+        // 第 3 層：訊號反轉 (穿越條件)
         if (i > 0 && ts[i - 1]) {
             const p = ts[i - 1];
             if (p.SDV >= 50 && t.SDV < 50 && t.VDV >= 60) {
@@ -468,7 +461,7 @@ class QuantDecisionEngine {
     }
 
     // ============================================================
-    // 回測主體
+    // 回測流程
     // ============================================================
     runBacktest(initCapital) {
         initCapital = initCapital || 100000;
@@ -540,7 +533,7 @@ class QuantDecisionEngine {
                 continue;
             }
 
-            // ===== 空手：進場判斷 =====
+            // ===== 空手進場判斷 =====
             if (i < cooldownUntil) continue;
             if (!t.ma20) continue;
 
@@ -581,21 +574,31 @@ class QuantDecisionEngine {
     }
 
     // ============================================================
-    // 對外 API 1：最新分析
+    // 對外 API 1：最新分析結果
     // ============================================================
     getLatestAnalysis(initCapital) {
         initCapital = initCapital || 100000;
-        const backtest = this.runBacktest(initCapital);
-        if (!backtest.trades.length && !backtest.openPosition) return null;
+        if (this.tScores.length === 0) this.calculateTScores();
+        if (this.tScores.length === 0) return null;
 
+        const backtest = this.runBacktest(initCapital);
         const last = this.tScores[this.tScores.length - 1];
         const decision = this.mapDecisionToUI(last, backtest);
+
+        // 判斷 ADV 爆發情緒拐點
+        let takeProfitAlert = '常態監控中';
+        let action = backtest.openPosition ? 'HOLD' : 'WAIT';
+
+        if (last.SDV >= 65 && last.ADV >= 70 && last.d1_ADV <= -3.0) {
+            takeProfitAlert = '🚨 觸發極致爆發情緒拐點 (SDV≥65, ADV≥70, Δ₁ADV≤-3.0)';
+            action = 'EXIT_FULL';
+        }
 
         const advRiskControl = {
             stopLossMode: this.getStopLossMode(last.ADV),
             stopLossRule: this.getStopLossRule(last.ADV, last.atr),
-            takeProfitAlert: '常態監控中',
-            action: backtest.openPosition ? 'HOLD' : 'WAIT'
+            takeProfitAlert,
+            action
         };
 
         return {
@@ -611,14 +614,14 @@ class QuantDecisionEngine {
     }
 
     // ============================================================
-    // 對外 API 2：歷史決策訊號（近 N 日）
+    // 對外 API 2：歷史決策訊號紀錄 (近 N 日)
     // ============================================================
     getHistoricalDecisionSignals(days, initCapital) {
         days = days || 120;
         initCapital = initCapital || 100000;
         const backtest = this.runBacktest(initCapital);
         const ts = this.tScores;
-        const start = Math.max(10, ts.length - days);
+        const start = Math.max(0, ts.length - days);
         const signals = [];
 
         const sigMap = new Map();
@@ -647,7 +650,7 @@ class QuantDecisionEngine {
                     name: sig.type,
                     signal: `${trackLabel} ${sig.grade}級 (${sig.score}分)`,
                     color: color,
-                    desc: `${sig.type} 觸發，倉位 ${Math.round(sig.size * 100)}%`
+                    desc: `${sig.type} 觸發進場，建倉比例 ${Math.round(sig.size * 100)}%`
                 };
             } else if (trd && trd.kind === 'EXIT') {
                 const tr = trd.data;
@@ -655,20 +658,25 @@ class QuantDecisionEngine {
                 decision = {
                     action: 'EXIT',
                     name: tr.reason,
-                    signal: `${tr.retPct > 0 ? '獲利' : '停損'} ${tr.retPct.toFixed(2)}%`,
+                    signal: `${tr.retPct > 0 ? '獲利平倉' : '停損出場'} ${tr.retPct.toFixed(2)}%`,
                     color: color,
-                    desc: `${tr.reason} @ ${tr.exitPrice.toFixed(2)}`
+                    desc: `${tr.reason} @ NT$ ${tr.exitPrice.toFixed(2)}`
                 };
                 riskAction = 'EXIT_FULL';
             } else {
                 const sdv = t.SDV;
                 let name, signal, color;
-                if (sdv >= 70) { name = '極致超買'; signal = '警戒'; color = 'amber'; }
-                else if (sdv >= 60) { name = '多頭強勢'; signal = '續抱'; color = 'red'; }
-                else if (sdv >= 50) { name = '中性偏多'; signal = '觀望'; color = 'blue'; }
-                else if (sdv >= 40) { name = '中性偏空'; signal = '觀望'; color = 'blue'; }
-                else { name = '空頭強勢'; signal = '空手'; color = 'green'; }
-                decision = { action: 'HOLD', name, signal, color, desc: `SDV ${sdv.toFixed(1)}` };
+                if (sdv >= 70) { name = '極致超買'; signal = '強勢主攻'; color = 'amber'; }
+                else if (sdv >= 60) { name = '多頭強勢'; signal = '趨勢延伸'; color = 'red'; }
+                else if (sdv >= 50) { name = '中性偏多'; signal = '溫和控盤'; color = 'blue'; }
+                else if (sdv >= 40) { name = '中性偏空'; signal = '溫和控盤'; color = 'blue'; }
+                else if (sdv >= 30) { name = '空頭強勢'; signal = '趨勢下尋'; color = 'green'; }
+                else { name = '極致超賣'; signal = '恐慌主跌'; color = 'green'; }
+                decision = { action: 'HOLD', name, signal, color, desc: `SDV ${sdv.toFixed(1)}｜${name}` };
+            }
+
+            if (t.SDV >= 65 && t.ADV >= 70 && t.d1_ADV <= -3.0) {
+                riskAlert = '🚨 情緒拐點警示';
             }
 
             signals.push({
@@ -688,7 +696,7 @@ class QuantDecisionEngine {
     }
 
     // ============================================================
-    // 輔助方法
+    // 輔助函式
     // ============================================================
     getHigh20(ts, i) {
         if (i < 20) return null;
@@ -709,18 +717,24 @@ class QuantDecisionEngine {
     mapDecisionToUI(last, backtest) {
         const SDV = last.SDV;
         let name, signal, color;
-        if (SDV >= 70) { name = '極致超買'; signal = '警戒'; color = 'amber'; }
-        else if (SDV >= 60) { name = '多頭強勢'; signal = '續抱'; color = 'red'; }
-        else if (SDV >= 50) { name = '中性偏多'; signal = '觀望'; color = 'blue'; }
-        else if (SDV >= 40) { name = '中性偏空'; signal = '觀望'; color = 'blue'; }
-        else { name = '空頭強勢'; signal = '空手'; color = 'green'; }
-        return { action: 'HOLD', name, signal, color, desc: `當前 SDV ${SDV.toFixed(1)}，系統判斷為「${name}」` };
+        if (SDV >= 70) { name = '極致超買'; signal = '強勢主攻'; color = 'amber'; }
+        else if (SDV >= 60) { name = '多頭強勢'; signal = '趨勢延伸'; color = 'red'; }
+        else if (SDV >= 50) { name = '中性偏多'; signal = '溫和控盤'; color = 'blue'; }
+        else if (SDV >= 40) { name = '中性偏空'; signal = '溫和控盤'; color = 'blue'; }
+        else if (SDV >= 30) { name = '空頭強勢'; signal = '趨勢下尋'; color = 'green'; }
+        else { name = '極致超賣'; signal = '恐慌主跌'; color = 'green'; }
+
+        return {
+            action: backtest.openPosition ? 'HOLD' : 'WAIT',
+            name, signal, color,
+            desc: `當前 SDV 為 ${SDV.toFixed(1)}，位階判定為「${name} (${signal})」。`
+        };
     }
 
     getStopLossMode(adv) {
-        if (adv < 40) return '低波動蓄勢期（窄停損）';
-        if (adv <= 60) return '常態順勢期（標準停損）';
-        return '高波動爆發期（移動緊縮停損）';
+        if (adv < 40) return '低波動蓄勢期 (窄停損)';
+        if (adv <= 60) return '常態順勢期 (標準停損)';
+        return '高波動爆發期 (移動緊縮停損)';
     }
 
     getStopLossRule(adv, atr) {

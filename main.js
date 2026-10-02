@@ -1,22 +1,20 @@
 // ============================================================
-// GAS API 部署網址
+// GAS API 部署網址（指定 API）
 // ============================================================
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx5h2Ncq111yq3k6tFffiOS9m0vOBtVywbsVdfZPCHvNbSv0vIGYiC_MimgkZGV3gbP/exec";
 
-// ============================================================
-// 預設初始資金（若 API 未提供 initCapital 則使用此值）
-// ============================================================
+// 預設初始資金
 const DEFAULT_INIT_CAPITAL = 100000;
 
 // ============================================================
-// 主入口：分析股票
+// 主入口：進行台股實時分析
 // ============================================================
 async function analyzeStock() {
     const codeInput = document.getElementById("stockInput");
     const code = codeInput ? codeInput.value.trim() : "2330";
     if (!code) return;
 
-    document.getElementById("decisionDesc").innerText = `正在抓取 ${code} 即時行情資料...`;
+    document.getElementById("decisionDesc").innerText = `正在連線 GAS API 抓取 ${code} 即時行情資料...`;
 
     try {
         const res = await fetch(`${GAS_API_URL}?code=${encodeURIComponent(code)}`);
@@ -24,60 +22,57 @@ async function analyzeStock() {
 
         if (!rawData || rawData.status === "error" || !rawData.data || rawData.data.length === 0) {
             document.getElementById("decisionDesc").innerText =
-                rawData.message || `無法取得 ${code} 行情，請確認股票代碼。`;
+                rawData.message || `無法取得代碼 ${code} 之行情，請確認代碼是否正確。`;
             return;
         }
 
-        // 從 API 取得真實股票參數
+        // 從 API 取得股票真實資訊與參數
         const stockName = rawData.name || "（未取得名稱）";
         const isBefore9AM = rawData.isBefore9AM || false;
         const initCapital = rawData.initCapital || DEFAULT_INIT_CAPITAL;
 
-        // 建立 v10.7 運算引擎
+        // 實例化量化運算引擎 v10.7.2
         const engine = new QuantDecisionEngine(rawData.data);
         const result = engine.getLatestAnalysis(initCapital);
         const history = engine.getHistoricalDecisionSignals(120, initCapital);
 
         if (!result) {
             document.getElementById("decisionDesc").innerText =
-                "歷史資料筆數不足，無法計算對數 T-Score。";
+                "歷史 K 線資料筆數不足，無法計算對數 T-Score。";
             return;
         }
 
+        // 完整更新畫面
         updateUI(result, history, isBefore9AM, stockName, code);
 
     } catch (err) {
-        console.error("API 連線失敗:", err);
+        console.error("GAS API 連線失敗:", err);
         document.getElementById("decisionDesc").innerText =
-            "無法取得數據，請檢查網路連線或 CORS 設定。";
+            "連線失敗，請檢查網路連線或 GAS API CORS 跨域設定。";
     }
 }
 
 // ============================================================
-// 更新 UI（完全對應 index.html 結構）
+// 更新 UI (完全相容 index.html 元素標籤)
 // ============================================================
 function updateUI(res, history, isBefore9AM, stockName, code) {
     const { current, delta, decision, advRiskControl } = res;
 
-    // ---------- 股票名稱卡片 ----------
+    // 1. 股票名稱卡片
     document.getElementById("stockTitle").innerHTML =
         `<span class="text-2xl font-extrabold text-white">${code}</span>
          <span class="text-sm text-sky-300 font-semibold mt-1">${stockName}</span>`;
 
-    // ---------- 價格與成交量 ----------
-    document.getElementById("priceLabel").innerText =
-        isBefore9AM ? "昨日 (T-1) 收盤價" : "當日 (T) 即時股價";
-    document.getElementById("volumeLabel").innerText =
-        isBefore9AM ? "昨日 (T-1) 成交量" : "當日 (T) 即時成交量";
+    // 2. 股價與成交量標籤與數據
+    document.getElementById("priceLabel").innerText = isBefore9AM ? "昨日 (T-1) 收盤價" : "即時股價 (T / T-1)";
+    document.getElementById("volumeLabel").innerText = isBefore9AM ? "昨日 (T-1) 成交量" : "即時成交量 (T / T-1)";
     document.getElementById("stockPrice").innerText = `NT$ ${current.close.toFixed(2)}`;
-    document.getElementById("stockVolume").innerText =
-        `${Number(current.volume).toLocaleString()} 張`;
+    document.getElementById("stockVolume").innerText = `${Number(current.volume).toLocaleString()} 張`;
 
-    // ---------- 決策描述 ----------
-    document.getElementById("decisionDesc").innerText =
-        `${decision.name}：${decision.desc}`;
+    // 3. 系統決策描述
+    document.getElementById("decisionDesc").innerText = `${decision.name}：${decision.desc}`;
 
-    // ---------- 決策徽章 ----------
+    // 4. 當前決策徽章卡片
     const badge = document.getElementById("signalBadge");
     const cardSignal = document.getElementById("cardSignal");
     badge.innerText = `${decision.name} | ${decision.signal}`;
@@ -96,23 +91,23 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
         badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-sky-500/20 text-sky-400 border border-sky-500/30 text-center";
     }
 
-    // ---------- 四指標位階 ----------
+    // 5. 四指標 T-Score 位階與說明文案 (終版)
     updateCard("sdv", current.SDV, getSDVLevelDesc(current.SDV));
     updateCard("vdv", current.VDV, getVDVLevelDesc(current.VDV));
     updateCard("adv", current.ADV, getADVLevelDesc(current.ADV));
     updateCard("bdv", current.BDV, getBDVLevelDesc(current.BDV));
 
-    // ---------- 風控樞紐 ----------
+    // 6. ADV 動態移動風控樞紐區塊
     document.getElementById("advStopLossMode").innerText = advRiskControl.stopLossMode;
     document.getElementById("advStopLossRule").innerText = advRiskControl.stopLossRule;
 
     const tpElem = document.getElementById("advTakeProfitAlert");
     tpElem.innerText = advRiskControl.takeProfitAlert;
     tpElem.className = advRiskControl.action === "EXIT_FULL"
-        ? "text-sm font-bold text-emerald-400 bg-emerald-950/50 p-2 rounded border border-emerald-500/50 animate-pulse"
-        : "text-sm font-semibold text-sky-400";
+        ? "text-sm font-bold text-rose-400 bg-rose-950/60 p-2 rounded border border-rose-500/50 animate-pulse"
+        : "text-sm font-semibold text-emerald-400";
 
-    // ---------- Δ 動能矩陣 ----------
+    // 7. Δ 多週期動能矩陣表
     document.getElementById("deltaMatrixBody").innerHTML = `
         ${renderRow("SDV (股價離差)", current.SDV, delta.SDV_1, delta.SDV_5, delta.SDV_10)}
         ${renderRow("VDV (量能離差)", current.VDV, delta.VDV_1, delta.VDV_5, delta.VDV_10)}
@@ -120,12 +115,12 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
         ${renderRow("BDV (帶寬離差)", current.BDV, delta.BDV_1, delta.BDV_5, delta.BDV_10)}
     `;
 
-    // ---------- 歷史決策訊號 ----------
+    // 8. 渲染 6 個月歷史決策紀錄表
     renderHistoryTable(history);
 }
 
 // ============================================================
-// 更新四指標卡片
+// 輔助函式：更新四指標卡片數值與狀態
 // ============================================================
 function updateCard(type, val, desc) {
     const valEl = document.getElementById(`${type}Value`);
@@ -135,7 +130,7 @@ function updateCard(type, val, desc) {
 }
 
 // ============================================================
-// 渲染 Δ 動能矩陣列
+// 輔助函式：渲染 Δ 動能矩陣列
 // ============================================================
 function renderRow(label, curr, d1, d5, d10) {
     const fmt = (val) => {
@@ -158,7 +153,7 @@ function renderRow(label, curr, d1, d5, d10) {
 }
 
 // ============================================================
-// 渲染歷史決策訊號表（7 欄，完全對應 index.html）
+// 渲染歷史決策表格（對應 index.html 近 6 個月 7 欄位結構）
 // 欄位：交易日期 | 收盤價 | SDV | VDV | ADV / BDV | 觸發決策名稱 | 風控與診斷說明
 // ============================================================
 function renderHistoryTable(history) {
@@ -208,11 +203,11 @@ function renderHistoryTable(history) {
     }).join("");
 
     document.getElementById("historySummary").innerText =
-        `近 6 個月 (120 交易日)：${buyCount} 次買進，${exitCount} 次平倉，${riskAlertCount} 次風控警示。`;
+        `近 6 個月 (120 交易日)：${buyCount} 次買進觸發，${exitCount} 次平倉出場，${riskAlertCount} 次風控觸發。`;
 }
 
 // ============================================================
-// 四大指標位階文案
+// 四大指標位階文案 (依據附件四說明文案終版對應)
 // ============================================================
 function getSDVLevelDesc(val) {
     if (val >= 70) return "≥70 極致超買/強勢主攻";
@@ -250,7 +245,5 @@ function getBDVLevelDesc(val) {
     return "<30 極致收縮/Squeeze臨界";
 }
 
-// ============================================================
-// 頁面載入自動分析
-// ============================================================
+// 頁面載入完成後自動分析預設股票 (2330)
 window.onload = () => analyzeStock();
