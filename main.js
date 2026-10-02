@@ -4,9 +4,9 @@
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx5h2Ncq111yq3k6tFffiOS9m0vOBtVywbsVdfZPCHvNbSv0vIGYiC_MimgkZGV3gbP/exec";
 
 // ============================================================
-// 統一初始資金（所有股票皆 10 萬元）
+// 預設初始資金（若 API 未提供 initCapital 則使用此值）
 // ============================================================
-const INIT_CAPITAL = 100000;
+const DEFAULT_INIT_CAPITAL = 100000;
 
 // ============================================================
 // 主入口：分析股票
@@ -28,21 +28,23 @@ async function analyzeStock() {
             return;
         }
 
-        // 從 GAS API 取得真實參數：
-        //   rawData.data       → OHLCV 歷史 K 線陣列（>250 筆）
-        //   rawData.name       → 股票中文名稱
-        //   rawData.isBefore9AM → 是否盤前（true = 用 T-1 收盤）
+        // 從 API 取得真實股票參數
+        const stockName = rawData.name || "（未取得名稱）";
+        const isBefore9AM = rawData.isBefore9AM || false;
+        const initCapital = rawData.initCapital || DEFAULT_INIT_CAPITAL;
+
+        // 建立 v10.7 運算引擎
         const engine = new QuantDecisionEngine(rawData.data);
-        const result = engine.getLatestAnalysis(INIT_CAPITAL);
-        const history = engine.getHistoricalDecisionSignals(120, INIT_CAPITAL);
+        const result = engine.getLatestAnalysis(initCapital);
+        const history = engine.getHistoricalDecisionSignals(120, initCapital);
 
         if (!result) {
             document.getElementById("decisionDesc").innerText =
-                "歷史資料筆數不足，無法計算對數 T-Score（需 ≥ 48 筆）。";
+                "歷史資料筆數不足，無法計算對數 T-Score。";
             return;
         }
 
-        updateUI(result, history, rawData.isBefore9AM, rawData.name, code);
+        updateUI(result, history, isBefore9AM, stockName, code);
 
     } catch (err) {
         console.error("API 連線失敗:", err);
@@ -52,24 +54,30 @@ async function analyzeStock() {
 }
 
 // ============================================================
-// 更新 UI（對應 index.html 的所有 id）
+// 更新 UI（完全對應 index.html 結構）
 // ============================================================
 function updateUI(res, history, isBefore9AM, stockName, code) {
     const { current, delta, decision, advRiskControl } = res;
 
-    // ---- 區塊 1：股票名稱卡片 ----
+    // ---------- 股票名稱卡片 ----------
     document.getElementById("stockTitle").innerHTML =
         `<span class="text-2xl font-extrabold text-white">${code}</span>
-         <span class="text-sm text-sky-300 font-semibold mt-1">${stockName || '（未取得名稱）'}</span>`;
+         <span class="text-sm text-sky-300 font-semibold mt-1">${stockName}</span>`;
 
-    document.getElementById("priceLabel").innerText = isBefore9AM ? "昨日 (T-1) 收盤價" : "當日 (T) 即時股價";
-    document.getElementById("volumeLabel").innerText = isBefore9AM ? "昨日 (T-1) 成交量" : "當日 (T) 即時成交量";
+    // ---------- 價格與成交量 ----------
+    document.getElementById("priceLabel").innerText =
+        isBefore9AM ? "昨日 (T-1) 收盤價" : "當日 (T) 即時股價";
+    document.getElementById("volumeLabel").innerText =
+        isBefore9AM ? "昨日 (T-1) 成交量" : "當日 (T) 即時成交量";
     document.getElementById("stockPrice").innerText = `NT$ ${current.close.toFixed(2)}`;
-    document.getElementById("stockVolume").innerText = `${Number(current.volume).toLocaleString()} 張`;
+    document.getElementById("stockVolume").innerText =
+        `${Number(current.volume).toLocaleString()} 張`;
 
-    document.getElementById("decisionDesc").innerText = `${decision.name}：${decision.desc}`;
+    // ---------- 決策描述 ----------
+    document.getElementById("decisionDesc").innerText =
+        `${decision.name}：${decision.desc}`;
 
-    // ---- 區塊 2：決策訊號徽章 ----
+    // ---------- 決策徽章 ----------
     const badge = document.getElementById("signalBadge");
     const cardSignal = document.getElementById("cardSignal");
     badge.innerText = `${decision.name} | ${decision.signal}`;
@@ -88,13 +96,13 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
         badge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-sky-500/20 text-sky-400 border border-sky-500/30 text-center";
     }
 
-    // ---- 區塊 3：四大指標位階 ----
+    // ---------- 四指標位階 ----------
     updateCard("sdv", current.SDV, getSDVLevelDesc(current.SDV));
     updateCard("vdv", current.VDV, getVDVLevelDesc(current.VDV));
     updateCard("adv", current.ADV, getADVLevelDesc(current.ADV));
     updateCard("bdv", current.BDV, getBDVLevelDesc(current.BDV));
 
-    // ---- 區塊 4：ADV 動態風控樞紐 ----
+    // ---------- 風控樞紐 ----------
     document.getElementById("advStopLossMode").innerText = advRiskControl.stopLossMode;
     document.getElementById("advStopLossRule").innerText = advRiskControl.stopLossRule;
 
@@ -104,7 +112,7 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
         ? "text-sm font-bold text-emerald-400 bg-emerald-950/50 p-2 rounded border border-emerald-500/50 animate-pulse"
         : "text-sm font-semibold text-sky-400";
 
-    // ---- 區塊 5：Δ 動能矩陣 ----
+    // ---------- Δ 動能矩陣 ----------
     document.getElementById("deltaMatrixBody").innerHTML = `
         ${renderRow("SDV (股價離差)", current.SDV, delta.SDV_1, delta.SDV_5, delta.SDV_10)}
         ${renderRow("VDV (量能離差)", current.VDV, delta.VDV_1, delta.VDV_5, delta.VDV_10)}
@@ -112,12 +120,12 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
         ${renderRow("BDV (帶寬離差)", current.BDV, delta.BDV_1, delta.BDV_5, delta.BDV_10)}
     `;
 
-    // ---- 區塊 6：歷史決策訊號紀錄 ----
+    // ---------- 歷史決策訊號 ----------
     renderHistoryTable(history);
 }
 
 // ============================================================
-// 更新四指標卡片（對應 index.html 的 sdvValue / sdvStatus 等）
+// 更新四指標卡片
 // ============================================================
 function updateCard(type, val, desc) {
     const valEl = document.getElementById(`${type}Value`);
@@ -150,7 +158,8 @@ function renderRow(label, curr, d1, d5, d10) {
 }
 
 // ============================================================
-// 渲染歷史決策訊號表（對應 index.html 的 7 欄）
+// 渲染歷史決策訊號表（7 欄，完全對應 index.html）
+// 欄位：交易日期 | 收盤價 | SDV | VDV | ADV / BDV | 觸發決策名稱 | 風控與診斷說明
 // ============================================================
 function renderHistoryTable(history) {
     const tbody = document.getElementById("historyTableBody");
