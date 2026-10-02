@@ -51,7 +51,7 @@ async function analyzeStock() {
 // 更新 UI
 // ============================================================
 function updateUI(res, history, isBefore9AM, stockName, code) {
-    const { current, delta, decision, advRiskControl } = res;
+    const { current, delta, decision, advRiskControl, backtest } = res;
 
     // 股票名稱卡片
     document.getElementById("stockTitle").innerHTML =

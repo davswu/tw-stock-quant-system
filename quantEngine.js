@@ -621,11 +621,9 @@ class QuantDecisionEngine {
         const start = Math.max(10, ts.length - days);
         const signals = [];
 
-        // 進場訊號 Map
         const sigMap = new Map();
         backtest.signalLog.forEach(s => sigMap.set(this.formatDate(s.date), s));
 
-        // 交易事件 Map
         const tradeMap = new Map();
         backtest.trades.forEach(t => {
             tradeMap.set(this.formatDate(t.entryDate), { kind: 'ENTRY', data: t });
