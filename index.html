@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>台股實時四指標與歷史系統決策矩陣</title>
+    <title>台股實時四指標與歷史系統決策矩陣 (v10.7.2)</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
@@ -15,7 +15,7 @@
         <header class="flex flex-col md:flex-row justify-between items-center bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg gap-4">
             <div>
                 <h1 class="text-2xl font-bold text-sky-400">台股實時四指標與系統決策矩陣</h1>
-                <p class="text-sm text-slate-400 mt-1">對數標準化 (T-Score) + 多週期動能 (Δ₁ / Δ₅ / Δ₁₀) + ADV 動態移動風控 + 6個月歷史訊號追蹤</p>
+                <p class="text-sm text-slate-400 mt-1">對數標準化 (T-Score) + 多週期動能 (Δ₁ / Δ₅ / Δ₁₀) + 三軌進場 + 四層出場 + 6個月歷史訊號追蹤</p>
             </div>
             
             <div class="flex items-center space-x-2 w-full md:w-auto">
@@ -102,9 +102,9 @@
                 </div>
 
                 <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-700/80">
-                    <div class="text-xs text-slate-400 mb-1">極致爆發移動停利監控 (Trailing Take-Profit)</div>
+                    <div class="text-xs text-slate-400 mb-1">移動停利監控 (Trailing Take-Profit)</div>
                     <div id="advTakeProfitAlert" class="text-sm font-semibold text-emerald-400">常態監控中</div>
-                    <div class="text-xs text-slate-400 mt-2">觸發條件：SDV ≥ 65 & ADV ≥ 70 且 Δ₁ADV ≤ -3.0 (情緒爆發拐點出場)</div>
+                    <div class="text-xs text-slate-400 mt-2">觸發層級：+5%（保本）→ +10%（鎖3%）→ +15%（鎖8%）→ +20%（過熱高潮）</div>
                 </div>
             </div>
         </div>
