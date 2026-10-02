@@ -1,7 +1,6 @@
 /**
- * QuantDecisionEngine v10.7.2
+ * QuantDecisionEngine v10.7.3
  * 四指標趨勢分析引擎 — 三軌進場、四層出場、三次加碼、冷卻期、排除條款
- * 適配 index.html 架構
  */
 
 class QuantDecisionEngine {
@@ -184,7 +183,7 @@ class QuantDecisionEngine {
     }
 
     // ============================================================
-    // 步驟 5：常規訊號檢查（供早期試單互斥用）
+    // 步驟 5：常規訊號檢查
     // ============================================================
     checkRegularSignal(tsHistory, i) {
         const t = tsHistory[i];
@@ -217,7 +216,7 @@ class QuantDecisionEngine {
     }
 
     // ============================================================
-    // 步驟 6：三軌進場判斷（軌 1 → 軌 3 → 軌 2）
+    // 步驟 6：三軌進場判斷
     // ============================================================
     evaluateEntry(tsHistory, i) {
         const t = tsHistory[i];
@@ -225,7 +224,6 @@ class QuantDecisionEngine {
 
         const d1 = this.computeDelta(t, tsHistory[i - 1], tsHistory[i - 5], tsHistory[i - 10]);
 
-        // 高位禁買
         let recentSdvMax = 0;
         for (let k = Math.max(0, i - 5); k <= i; k++) {
             if (tsHistory[k] && tsHistory[k].SDV > recentSdvMax) recentSdvMax = tsHistory[k].SDV;
@@ -233,8 +231,6 @@ class QuantDecisionEngine {
         if (recentSdvMax > 75) return { signal: 'WAIT', reason: '近期 SDV 過高' };
 
         // ===== 軌道 1：常規訊號 =====
-
-        // 1. 突破前高
         if (t.high20 !== null && t.high20 !== undefined && t.close >= t.high20
             && t.VDV >= 60 && t.SDV >= 50 && t.SDV <= 65) {
             const ex = this.isExcluded(t, d1);
@@ -242,7 +238,6 @@ class QuantDecisionEngine {
                 score: 70, grade: 'B', size: 0.50, price: t.close };
         }
 
-        // 2. 蓄勢突破
         if (t.ADV >= 35 && t.ADV <= 65 && t.BDV < 55
             && t.SDV >= 45 && t.SDV <= 68 && t.VDV >= 50) {
             let s = 0;
@@ -266,7 +261,6 @@ class QuantDecisionEngine {
             }
         }
 
-        // 3. 順勢拉回
         if (t.ADV >= 35 && t.ADV <= 65 && t.BDV >= 40 && t.BDV <= 70
             && t.SDV >= 45 && t.SDV <= 65 && t.VDV < 50) {
             let s = 0;
@@ -290,7 +284,6 @@ class QuantDecisionEngine {
             }
         }
 
-        // 4. 假跌破掃蕩
         if (i > 0) {
             const prev = tsHistory[i - 1];
             if (t.ADV >= 45 && t.ADV <= 70 && t.BDV < 60
@@ -314,7 +307,6 @@ class QuantDecisionEngine {
             }
         }
 
-        // 5. 極致超跌
         if (t.ADV >= 60 && t.BDV >= 60 && t.SDV < 35 && t.VDV >= 60) {
             let s = 0;
             if (d1.SDV_10 <= -10) s += 15;
@@ -344,7 +336,7 @@ class QuantDecisionEngine {
                 score: 60, grade: 'S', size: 0.30, price: t.close };
         }
 
-        // ===== 軌道 2：早期試單（含互斥）=====
+        // ===== 軌道 2：早期試單 =====
         if (t.ma20 && t.ma20 > 0) {
             const ma20Dist = Math.abs(t.close - t.ma20) / t.ma20;
             if (ma20Dist < 0.015
@@ -412,6 +404,17 @@ class QuantDecisionEngine {
         const ts = this.tScores;
         const len = ts.length;
 
+        // 🟢 關鍵修正點：防範歷史數據不足 (len === 0) 導致讀取 ts[-1].close 拋出 TypeError 潰散
+        if (!ts || len === 0) {
+            return {
+                finalValue: initCash,
+                totalReturn: 0,
+                trades: [],
+                signalLog: [],
+                openPosition: null
+            };
+        }
+
         let capital = initCash;
         let position = null;
         const trades = [];
@@ -433,7 +436,6 @@ class QuantDecisionEngine {
                 const d1 = this.computeDelta(t, ts[i-1], ts[i-5], ts[i-10]);
                 let exitPrice = null, exitReason = null;
 
-                // 第 1 層：ATR 動態停損
                 let stopMult = t.ADV < 40 ? 2.0 : t.ADV < 60 ? 2.5 : 3.0;
                 const stopPrice = position.avgPrice - stopMult * t.atr;
                 if (t.low <= stopPrice) {
@@ -441,7 +443,6 @@ class QuantDecisionEngine {
                     exitReason = `破位停損 (${stopMult}×ATR)`;
                 }
 
-                // 第 2 層：移動停利
                 if (!exitPrice) {
                     let trailLevel = null;
                     if (curRet >= 20) trailLevel = position.highest - 3.5 * t.atr;
@@ -456,7 +457,6 @@ class QuantDecisionEngine {
                     }
                 }
 
-                // 第 3 層：訊號反轉
                 if (!exitPrice && i > 0) {
                     const prev = ts[i-1];
                     if (prev.SDV >= 50 && t.SDV < 50 && t.VDV >= 60) {
@@ -465,7 +465,6 @@ class QuantDecisionEngine {
                     }
                 }
 
-                // 第 4 層：時間停損
                 if (!exitPrice) {
                     const holdDays = i - position.entryIdx;
                     if (holdDays >= 20 && curRet < 8) {
@@ -494,7 +493,6 @@ class QuantDecisionEngine {
                     continue;
                 }
 
-                // 加碼
                 const addResult = this.evaluateAdd(t, position, curRet, d1);
                 if (addResult) {
                     const addShares = Math.floor((capital * addResult.addSize) / addResult.price);
@@ -631,7 +629,6 @@ class QuantDecisionEngine {
 
         const pairs = [];
 
-        // 已平倉交易
         for (let i = 0; i < result.trades.length; i++) {
             const tr = result.trades[i];
             if (!tr) continue;
@@ -656,7 +653,6 @@ class QuantDecisionEngine {
             });
         }
 
-        // 持倉中
         if (result.openPosition) {
             const op = result.openPosition;
             const entryPrice = Number(op.entryPrice);
@@ -687,7 +683,6 @@ class QuantDecisionEngine {
 
         const SDV = t.SDV;
 
-        // 優先檢查進場訊號
         if (this.tScores.length > 0) {
             const entryRes = this.evaluateEntry(this.tScores, this.tScores.length - 1);
             if (entryRes.signal === 'BUY_BASE') {
