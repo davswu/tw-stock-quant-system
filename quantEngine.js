@@ -1,64 +1,47 @@
 /**
- * QuantDecisionEngine v10.7.2 終版
- * 包含：對數 T-Score (SDV, VDV, ADV, BDV) + 多週期動能 (Δ₁ / Δ₅ / Δ₁₀)
- * 三軌進場系統 + 動能加碼 + 四層出場 + ADV 動態移動風控樞紐
+ * QuantDecisionEngine v10.7.2
+ * 四指標趨勢分析引擎 — 三軌進場、四層出場、三次加碼、冷卻期、排除條款
+ * 適配 index.html 架構
  */
+
 class QuantDecisionEngine {
     constructor(rawData) {
-        this.rawData = rawData || [];
+        this.rawData = this.normalizeData(rawData) || [];
         this.tScores = [];
-
-        // ============ 全域參數量化設定 ============
-        this.WINDOW = 30;         // T-Score 滾動視窗
-        this.ATR_PERIOD = 14;     // ATR 週期
-        this.BB_PERIOD = 20;      // 帶寬週期
-        this.COMMISSION = 0.001425; // 交易手續費率
-        this.TAX = 0.003;         // 證券交易稅率
-
-        // 進場門檻
-        this.A_GRADE = 70;
-        this.B_GRADE = 50;
-        this.EXTREME_GRADE = 45;
-        this.HIGH_SDV_FORBID = 75.0; // 高位禁買線
-        this.HIGH_SDV_LOOKBACK = 5;
-        this.INIT_A_SIZE = 0.70;
-        this.INIT_B_SIZE = 0.50;
-
-        // 加碼機制
-        this.ADD1_RET = 5.0;
-        this.ADD1_SIZE_A = 0.15;
-        this.ADD1_SIZE_B = 0.25;
-        this.ADD2_RET = 10.0;
-        this.ADD2_SIZE_A = 0.10;
-        this.ADD2_SIZE_B = 0.15;
-        this.ADD3_RET = 20.0;
-        this.ADD3_SIZE = 0.10;
-
-        // 時間停損與冷卻期
-        this.TIME_STOP_DAYS = 20;
-        this.TIME_STOP_MIN_RET = 8.0;
-        this.COOLDOWN_1 = 3;
-        this.COOLDOWN_2 = 6;
-        this.COOLDOWN_3 = 12;
-        this.EARLY_MUTEX_DAYS = 3;
-
-        // 軌3：Squeeze 突破
-        this.SQUEEZE_BDV_MAX = 40;
-        this.SQUEEZE_VOL_RATIO = 1.15;
-        this.SQUEEZE_SIZE = 0.30;
-
-        // 軌2：早期試單
-        this.EARLY_MA20_DIST = 0.015;
-        this.EARLY_SDV_MIN = 48;
-        this.EARLY_SDV_MAX = 58;
-        this.EARLY_VDV_MIN = 50;
-        this.EARLY_VDV_MAX = 65;
-        this.EARLY_SIZE = 0.30;
-        this.EARLY_ADD_CONFIRM = 0.40;
+        this.initCash = 100000;
     }
 
     // ============================================================
-    // 步驟 1：衍生指標計算 (ATR / Bandwidth / MA20 / 前5日均量)
+    // 步驟 0：資料正規化（防禦性）
+    // ============================================================
+    normalizeData(raw) {
+        if (!Array.isArray(raw)) return [];
+        return raw.map(d => {
+            if (!d) return null;
+            const pick = (obj, keys) => {
+                for (const k of keys) {
+                    if (obj[k] !== undefined && obj[k] !== null) return obj[k];
+                }
+                return null;
+            };
+            const num = (v) => {
+                if (v === null || v === undefined) return NaN;
+                const n = Number(String(v).replace(/,/g, ''));
+                return Number.isFinite(n) ? n : NaN;
+            };
+            return {
+                date: pick(d, ['date', 'Date', 'time', 'datetime']),
+                open: num(pick(d, ['open', 'Open', 'o'])),
+                high: num(pick(d, ['high', 'High', 'h'])),
+                low: num(pick(d, ['low', 'Low', 'l'])),
+                close: num(pick(d, ['close', 'Close', 'c', 'price'])),
+                volume: num(pick(d, ['volume', 'Volume', 'v', 'vol']))
+            };
+        }).filter(d => d && Number.isFinite(d.close) && Number.isFinite(d.high) && Number.isFinite(d.low) && Number.isFinite(d.volume));
+    }
+
+    // ============================================================
+    // 步驟 1：計算衍生指標 ATR(14) / Bandwidth(20,2) / MA20
     // ============================================================
     calculateDerivedMetrics() {
         const len = this.rawData.length;
@@ -75,46 +58,29 @@ class QuantDecisionEngine {
             }
         }
 
-        // ATR (14)
         const atrs = [];
         for (let i = 0; i < len; i++) {
-            if (i < 13) atrs.push(null);
-            else {
+            if (i < 13) {
+                atrs.push(null);
+            } else {
                 const sum = trs.slice(i - 13, i + 1).reduce((a, b) => a + b, 0);
                 atrs.push(sum / 14);
             }
         }
 
-        // Bandwidth (20, 2)
         const bws = [];
+        const ma20s = [];
         for (let i = 0; i < len; i++) {
-            if (i < 19) bws.push(null);
-            else {
+            if (i < 19) {
+                bws.push(null);
+                ma20s.push(null);
+            } else {
                 const sliceC = this.rawData.slice(i - 19, i + 1).map(d => d.close);
                 const mean = sliceC.reduce((a, b) => a + b, 0) / 20;
                 const variance = sliceC.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / 20;
                 const std = Math.sqrt(variance);
                 bws.push(mean === 0 ? 0 : (4 * std) / mean);
-            }
-        }
-
-        // MA20
-        const ma20s = [];
-        for (let i = 0; i < len; i++) {
-            if (i < 19) ma20s.push(null);
-            else {
-                const sliceC = this.rawData.slice(i - 19, i + 1).map(d => d.close);
-                ma20s.push(sliceC.reduce((a, b) => a + b, 0) / 20);
-            }
-        }
-
-        // 前5日均量 (不含當日)
-        const vol5s = [];
-        for (let i = 0; i < len; i++) {
-            if (i < 5) vol5s.push(null);
-            else {
-                const sliceV = this.rawData.slice(i - 5, i).map(d => d.volume);
-                vol5s.push(sliceV.reduce((a, b) => a + b, 0) / 5);
+                ma20s.push(mean);
             }
         }
 
@@ -122,23 +88,24 @@ class QuantDecisionEngine {
             this.rawData[i].atr = atrs[i];
             this.rawData[i].bandwidth = bws[i];
             this.rawData[i].ma20 = ma20s[i];
-            this.rawData[i].vol5 = vol5s[i];
         }
     }
 
     // ============================================================
-    // 步驟 2：計算對數 T-Score 與 Δ 多週期動能
+    // 步驟 2：對數 T-Score 與 Δ 動能
     // ============================================================
-    calculateTScores() {
+    calculateTScores(windowSize = 30) {
         this.calculateDerivedMetrics();
         const len = this.rawData.length;
-        const W = this.WINDOW;
-        const raw = [];
+        const tScoresHistory = [];
 
         for (let i = 0; i < len; i++) {
-            if (i < W + 18) { raw.push(null); continue; }
+            if (i < windowSize + 18) {
+                tScoresHistory.push(null);
+                continue;
+            }
 
-            const window = this.rawData.slice(i - W + 1, i + 1);
+            const window = this.rawData.slice(i - windowSize + 1, i + 1);
             const lnP = window.map(d => Math.log(Math.max(d.close, 0.0001)));
             const lnV = window.map(d => Math.log(Math.max(d.volume, 1)));
             const lnA = window.map(d => Math.log(Math.max(d.atr, 0.0001)));
@@ -154,17 +121,25 @@ class QuantDecisionEngine {
             };
 
             const curr = this.rawData[i];
-            raw.push({
+            const vol5Sum = this.rawData.slice(Math.max(0, i - 4), i).reduce((a, b) => a + b.volume, 0);
+            const vol5 = i >= 5 ? vol5Sum / 5 : curr.volume;
+
+            const high20 = i >= 20
+                ? Math.max(...this.rawData.slice(i - 20, i).map(d => d.close))
+                : null;
+
+            tScoresHistory.push({
                 date: curr.date,
                 open: curr.open,
-                close: curr.close,
                 high: curr.high,
                 low: curr.low,
+                close: curr.close,
                 volume: curr.volume,
                 atr: curr.atr,
                 bandwidth: curr.bandwidth,
                 ma20: curr.ma20,
-                vol5: curr.vol5,
+                vol5: vol5,
+                high20: high20,
                 SDV: calcTS(curr.close, lnP),
                 VDV: calcTS(curr.volume, lnV),
                 ADV: calcTS(curr.atr, lnA),
@@ -172,200 +147,220 @@ class QuantDecisionEngine {
             });
         }
 
-        // 計算 Δ 矩陣
-        const result = [];
-        for (let i = 0; i < raw.length; i++) {
-            const t = raw[i];
-            if (!t || i < 10) { result.push(t); continue; }
-            const t1 = raw[i - 1], t5 = raw[i - 5], t10 = raw[i - 10];
-            if (!t1 || !t5 || !t10) { result.push(t); continue; }
-
-            t.d1_SDV = t.SDV - t1.SDV; t.d5_SDV = t.SDV - t5.SDV; t.d10_SDV = t.SDV - t10.SDV;
-            t.d1_VDV = t.VDV - t1.VDV; t.d5_VDV = t.VDV - t5.VDV; t.d10_VDV = t.VDV - t10.VDV;
-            t.d1_ADV = t.ADV - t1.ADV; t.d5_ADV = t.ADV - t5.ADV; t.d10_ADV = t.ADV - t10.ADV;
-            t.d1_BDV = t.BDV - t1.BDV; t.d5_BDV = t.BDV - t5.BDV; t.d10_BDV = t.BDV - t10.BDV;
-            result.push(t);
-        }
-
-        this.tScores = result.filter(d => d !== null);
+        this.tScores = tScoresHistory.filter(d => d !== null);
         return this.tScores;
     }
 
     // ============================================================
-    // 排除條款 E1 ~ E4
+    // 步驟 3：計算 Δ 動能
     // ============================================================
-    isExcluded(t) {
+    computeDelta(t, t_1, t_5, t_10) {
+        if (!t || !t_1 || !t_5 || !t_10) {
+            return {
+                SDV_1: 0, SDV_5: 0, SDV_10: 0,
+                VDV_1: 0, VDV_5: 0, VDV_10: 0,
+                ADV_1: 0, ADV_5: 0, ADV_10: 0,
+                BDV_1: 0, BDV_5: 0, BDV_10: 0
+            };
+        }
+        return {
+            SDV_1: t.SDV - t_1.SDV, SDV_5: t.SDV - t_5.SDV, SDV_10: t.SDV - t_10.SDV,
+            VDV_1: t.VDV - t_1.VDV, VDV_5: t.VDV - t_5.VDV, VDV_10: t.VDV - t_10.VDV,
+            ADV_1: t.ADV - t_1.ADV, ADV_5: t.ADV - t_5.ADV, ADV_10: t.ADV - t_10.ADV,
+            BDV_1: t.BDV - t_1.BDV, BDV_5: t.BDV - t_5.BDV, BDV_10: t.BDV - t_10.BDV
+        };
+    }
+
+    // ============================================================
+    // 步驟 4：排除條款 E1~E4
+    // ============================================================
+    isExcluded(t, d) {
+        if (!t) return null;
         if (t.SDV >= 80) return 'E1';
-        if (t.d5_SDV >= 25) return 'E2';
+        if (d && d.SDV_5 >= 25) return 'E2';
         if (t.ma20 && t.close > t.ma20 * 1.20) return 'E3';
-        if (t.d10_BDV >= 15 && t.SDV >= 70) return 'E4';
+        if (d && d.BDV_10 >= 15 && t.SDV >= 70) return 'E4';
         return null;
     }
 
-    // 檢查常規進場訊號（供早期試單互斥驗證）
-    checkRegularSignal(ts, i) {
-        const r = ts[i];
-        if (!r || r.SDV === undefined || r.d10_SDV === undefined) return false;
+    // ============================================================
+    // 步驟 5：常規訊號檢查（供早期試單互斥用）
+    // ============================================================
+    checkRegularSignal(tsHistory, i) {
+        const t = tsHistory[i];
+        if (!t || t.SDV === undefined) return false;
+        if (i < 10) return false;
+        const d1_SDV = t.SDV - tsHistory[i - 1].SDV;
+        const d5_SDV = t.SDV - tsHistory[i - 5].SDV;
 
-        const high20 = this.getHigh20(ts, i);
-        if (high20 !== null && r.close >= high20 && r.VDV >= 60 && r.SDV >= 50 && r.SDV <= 65) return true;
-
-        if (r.ADV >= 35 && r.ADV <= 65 && r.BDV < 55 && r.SDV >= 45 && r.SDV <= 68 && r.VDV >= 50) {
-            let s = 0;
-            if (r.d10_SDV >= 3) s += 10;
-            if (r.d10_VDV > 0) s += 10;
-            if (r.d10_BDV <= -3) s += 10;
-            if (r.d5_SDV >= 3) s += 12;
-            if (r.d5_VDV >= 3) s += 12;
-            if (r.d5_BDV <= -3) s += 8;
-            if (r.d5_ADV >= -3 && r.d5_ADV <= 3) s += 8;
-            if (r.d1_SDV >= 3) s += 10;
-            if (r.d1_VDV >= 3) s += 10;
-            if (r.d1_BDV >= 3) s += 10;
-            if (s >= 50) return true;
+        if (t.high20 !== null && t.close >= t.high20
+            && t.VDV >= 60 && t.SDV >= 50 && t.SDV <= 65) {
+            return true;
         }
 
-        if (r.ADV >= 35 && r.ADV <= 65 && r.BDV >= 40 && r.BDV <= 70
-            && r.SDV >= 45 && r.SDV <= 65 && r.VDV < 50) {
+        if (t.ADV >= 35 && t.ADV <= 65 && t.BDV < 55
+            && t.SDV >= 45 && t.SDV <= 68 && t.VDV >= 50) {
             let s = 0;
-            if (r.d10_SDV >= 3) s += 10;
-            if (r.d10_VDV >= 3) s += 10;
-            if (r.d10_BDV >= 3) s += 10;
-            if (r.d5_SDV >= -3 && r.d5_SDV <= 0) s += 12;
-            if (r.d5_VDV <= -3) s += 12;
-            if (r.d5_BDV >= -3 && r.d5_BDV <= 3) s += 8;
-            if (r.d5_ADV <= 0) s += 8;
-            if (r.d1_SDV >= 3) s += 10;
-            if (r.d1_VDV > 0) s += 10;
-            if (r.d1_BDV >= 0) s += 10;
-            if (s >= 50) return true;
+            if (d5_SDV >= 3) s += 12;
+            if (d1_SDV >= 3) s += 10;
+            if (s >= 22) return true;
         }
+
+        if (t.ADV >= 35 && t.ADV <= 65 && t.BDV >= 40 && t.BDV <= 70
+            && t.SDV >= 45 && t.SDV <= 65 && t.VDV < 50) {
+            let s = 0;
+            if (d5_SDV >= -3 && d5_SDV <= 0) s += 12;
+            if (s >= 12) return true;
+        }
+
         return false;
     }
 
     // ============================================================
-    // 三軌進場判斷（軌1 -> 軌3 -> 軌2）
+    // 步驟 6：三軌進場判斷（軌 1 → 軌 3 → 軌 2）
     // ============================================================
-    evaluateEntry(ts, i) {
-        const r = ts[i];
+    evaluateEntry(tsHistory, i) {
+        const t = tsHistory[i];
+        if (!t || i < 10) return { signal: 'WAIT' };
 
-        // 高位禁買線
+        const d1 = this.computeDelta(t, tsHistory[i - 1], tsHistory[i - 5], tsHistory[i - 10]);
+
+        // 高位禁買
         let recentSdvMax = 0;
-        for (let k = Math.max(0, i - this.HIGH_SDV_LOOKBACK); k <= i; k++) {
-            if (ts[k] && ts[k].SDV > recentSdvMax) recentSdvMax = ts[k].SDV;
+        for (let k = Math.max(0, i - 5); k <= i; k++) {
+            if (tsHistory[k] && tsHistory[k].SDV > recentSdvMax) recentSdvMax = tsHistory[k].SDV;
         }
-        if (recentSdvMax > this.HIGH_SDV_FORBID) return { signal: 'WAIT' };
+        if (recentSdvMax > 75) return { signal: 'WAIT', reason: '近期 SDV 過高' };
 
         // ===== 軌道 1：常規訊號 =====
-        const high20 = this.getHigh20(ts, i);
-        if (high20 !== null && r.close >= high20 && r.VDV >= 60 && r.SDV >= 50 && r.SDV <= 65) {
-            if (!this.isExcluded(r)) {
-                return { signal: 'BUY_BASE', track: 1, type: '突破前高', score: 70,
-                         grade: 'B', size: this.INIT_B_SIZE, price: r.close };
-            }
+
+        // 1. 突破前高
+        if (t.high20 !== null && t.high20 !== undefined && t.close >= t.high20
+            && t.VDV >= 60 && t.SDV >= 50 && t.SDV <= 65) {
+            const ex = this.isExcluded(t, d1);
+            if (!ex) return { signal: 'BUY_BASE', track: 1, type: '突破前高',
+                score: 70, grade: 'B', size: 0.50, price: t.close };
         }
 
-        if (r.ADV >= 35 && r.ADV <= 65 && r.BDV < 55 && r.SDV >= 45 && r.SDV <= 68 && r.VDV >= 50) {
+        // 2. 蓄勢突破
+        if (t.ADV >= 35 && t.ADV <= 65 && t.BDV < 55
+            && t.SDV >= 45 && t.SDV <= 68 && t.VDV >= 50) {
             let s = 0;
-            if (r.d10_SDV >= 3) s += 10;
-            if (r.d10_VDV > 0) s += 10;
-            if (r.d10_BDV <= -3) s += 10;
-            if (r.d5_SDV >= 3) s += 12;
-            if (r.d5_VDV >= 3) s += 12;
-            if (r.d5_BDV <= -3) s += 8;
-            if (r.d5_ADV >= -3 && r.d5_ADV <= 3) s += 8;
-            if (r.d1_SDV >= 3) s += 10;
-            if (r.d1_VDV >= 3) s += 10;
-            if (r.d1_BDV >= 3) s += 10;
-            if (s >= this.B_GRADE && !this.isExcluded(r)) {
-                const grade = s >= this.A_GRADE ? 'A' : 'B';
-                return { signal: 'BUY_BASE', track: 1, type: '蓄勢突破', score: s, grade,
-                         size: grade === 'A' ? this.INIT_A_SIZE : this.INIT_B_SIZE, price: r.close };
+            if (d1.SDV_10 >= 3) s += 10;
+            if (d1.VDV_10 > 0) s += 10;
+            if (d1.BDV_10 <= -3) s += 10;
+            if (d1.SDV_5 >= 3) s += 12;
+            if (d1.VDV_5 >= 3) s += 12;
+            if (d1.BDV_5 <= -3) s += 8;
+            if (d1.ADV_5 >= -3 && d1.ADV_5 <= 3) s += 8;
+            if (d1.SDV_1 >= 3) s += 10;
+            if (d1.VDV_1 >= 3) s += 10;
+            if (d1.BDV_1 >= 3) s += 10;
+            if (s >= 50) {
+                const ex = this.isExcluded(t, d1);
+                if (!ex) {
+                    const grade = s >= 70 ? 'A' : 'B';
+                    return { signal: 'BUY_BASE', track: 1, type: '蓄勢突破', score: s,
+                        grade, size: grade === 'A' ? 0.70 : 0.50, price: t.close };
+                }
             }
         }
 
-        if (r.ADV >= 35 && r.ADV <= 65 && r.BDV >= 40 && r.BDV <= 70
-            && r.SDV >= 45 && r.SDV <= 65 && r.VDV < 50) {
+        // 3. 順勢拉回
+        if (t.ADV >= 35 && t.ADV <= 65 && t.BDV >= 40 && t.BDV <= 70
+            && t.SDV >= 45 && t.SDV <= 65 && t.VDV < 50) {
             let s = 0;
-            if (r.d10_SDV >= 3) s += 10;
-            if (r.d10_VDV >= 3) s += 10;
-            if (r.d10_BDV >= 3) s += 10;
-            if (r.d5_SDV >= -3 && r.d5_SDV <= 0) s += 12;
-            if (r.d5_VDV <= -3) s += 12;
-            if (r.d5_BDV >= -3 && r.d5_BDV <= 3) s += 8;
-            if (r.d5_ADV <= 0) s += 8;
-            if (r.d1_SDV >= 3) s += 10;
-            if (r.d1_VDV > 0) s += 10;
-            if (r.d1_BDV >= 0) s += 10;
-            if (s >= this.B_GRADE && !this.isExcluded(r)) {
-                const grade = s >= this.A_GRADE ? 'A' : 'B';
-                return { signal: 'BUY_BASE', track: 1, type: '順勢拉回', score: s, grade,
-                         size: grade === 'A' ? this.INIT_A_SIZE : this.INIT_B_SIZE, price: r.close };
+            if (d1.SDV_10 >= 3) s += 10;
+            if (d1.VDV_10 >= 3) s += 10;
+            if (d1.BDV_10 >= 3) s += 10;
+            if (d1.SDV_5 >= -3 && d1.SDV_5 <= 0) s += 12;
+            if (d1.VDV_5 <= -3) s += 12;
+            if (d1.BDV_5 >= -3 && d1.BDV_5 <= 3) s += 8;
+            if (d1.ADV_5 <= 0) s += 8;
+            if (d1.SDV_1 >= 3) s += 10;
+            if (d1.VDV_1 > 0) s += 10;
+            if (d1.BDV_1 >= 0) s += 10;
+            if (s >= 50) {
+                const ex = this.isExcluded(t, d1);
+                if (!ex) {
+                    const grade = s >= 70 ? 'A' : 'B';
+                    return { signal: 'BUY_BASE', track: 1, type: '順勢拉回', score: s,
+                        grade, size: grade === 'A' ? 0.70 : 0.50, price: t.close };
+                }
             }
         }
 
-        if (i > 0 && ts[i - 1]) {
-            const prev = ts[i - 1];
-            if (r.ADV >= 45 && r.ADV <= 70 && r.BDV < 60
-                && prev.SDV < 55 && r.SDV >= 45) {
+        // 4. 假跌破掃蕩
+        if (i > 0) {
+            const prev = tsHistory[i - 1];
+            if (t.ADV >= 45 && t.ADV <= 70 && t.BDV < 60
+                && prev.SDV < 55 && t.SDV >= 45) {
                 let s = 0;
-                if (r.d10_SDV >= 0) s += 10;
-                if (r.d5_SDV <= -3) s += 15;
-                if (r.d5_VDV <= -3) s += 15;
-                if (r.d5_ADV >= 3) s += 10;
-                if (r.d1_SDV >= 10) s += 20;
-                if (r.d1_VDV >= 3) s += 15;
-                if (r.d1_BDV >= 3) s += 15;
-                if (s >= this.B_GRADE && !this.isExcluded(r)) {
-                    const grade = s >= this.A_GRADE ? 'A' : 'B';
-                    return { signal: 'BUY_BASE', track: 1, type: '假跌破掃蕩', score: s, grade,
-                             size: grade === 'A' ? this.INIT_A_SIZE : this.INIT_B_SIZE, price: r.close };
+                if (d1.SDV_10 >= 0) s += 10;
+                if (d1.SDV_5 <= -3) s += 15;
+                if (d1.VDV_5 <= -3) s += 15;
+                if (d1.ADV_5 >= 3) s += 10;
+                if (d1.SDV_1 >= 10) s += 20;
+                if (d1.VDV_1 >= 3) s += 15;
+                if (d1.BDV_1 >= 3) s += 15;
+                if (s >= 50) {
+                    const ex = this.isExcluded(t, d1);
+                    if (!ex) {
+                        const grade = s >= 70 ? 'A' : 'B';
+                        return { signal: 'BUY_BASE', track: 1, type: '假跌破掃蕩', score: s,
+                            grade, size: grade === 'A' ? 0.70 : 0.50, price: t.close };
+                    }
                 }
             }
         }
 
-        if (r.ADV >= 60 && r.BDV >= 60 && r.SDV < 35 && r.VDV >= 60) {
+        // 5. 極致超跌
+        if (t.ADV >= 60 && t.BDV >= 60 && t.SDV < 35 && t.VDV >= 60) {
             let s = 0;
-            if (r.d10_SDV <= -10) s += 15;
-            if (r.d10_VDV >= 10) s += 15;
-            if (r.d10_ADV >= 10) s += 10;
-            if (r.d10_BDV >= 10) s += 10;
-            if (r.d5_SDV <= -10) s += 15;
-            if (r.d1_SDV >= 3) s += 15;
-            if (r.d1_ADV <= -3) s += 10;
-            if (r.d1_BDV <= -3) s += 10;
-            if (s >= this.EXTREME_GRADE && !this.isExcluded(r)) {
-                const grade = s >= this.A_GRADE ? 'A' : 'B';
-                return { signal: 'BUY_BASE', track: 1, type: '極致超跌', score: s, grade,
-                         size: grade === 'A' ? this.INIT_A_SIZE : this.INIT_B_SIZE, price: r.close };
+            if (d1.SDV_10 <= -10) s += 15;
+            if (d1.VDV_10 >= 10) s += 15;
+            if (d1.ADV_10 >= 10) s += 10;
+            if (d1.BDV_10 >= 10) s += 10;
+            if (d1.SDV_5 <= -10) s += 15;
+            if (d1.SDV_1 >= 3) s += 15;
+            if (d1.ADV_1 <= -3) s += 10;
+            if (d1.BDV_1 <= -3) s += 10;
+            if (s >= 45) {
+                const ex = this.isExcluded(t, d1);
+                if (!ex) {
+                    const grade = s >= 70 ? 'A' : 'B';
+                    return { signal: 'BUY_BASE', track: 1, type: '極致超跌', score: s,
+                        grade, size: grade === 'A' ? 0.70 : 0.50, price: t.close };
+                }
             }
         }
 
-        // ===== 軌道 3：盤整突破 Squeeze =====
-        if (r.BDV !== undefined && r.BDV < this.SQUEEZE_BDV_MAX
-            && r.SDV >= 50 && r.SDV <= 62
-            && r.vol5 && r.volume >= r.vol5 * this.SQUEEZE_VOL_RATIO
-            && r.d1_SDV >= 2
-            && r.d1_BDV >= 1) {
-            return { signal: 'BUY_BASE', track: 3, type: '盤整突破', score: 60,
-                     grade: 'S', size: this.SQUEEZE_SIZE, price: r.close };
+        // ===== 軌道 3：盤整突破 =====
+        if (t.BDV !== undefined && t.BDV < 40
+            && t.SDV >= 50 && t.SDV <= 62
+            && t.vol5 > 0 && t.volume >= t.vol5 * 1.15
+            && d1.SDV_1 >= 2 && d1.BDV_1 >= 1) {
+            return { signal: 'BUY_BASE', track: 3, type: '盤整突破',
+                score: 60, grade: 'S', size: 0.30, price: t.close };
         }
 
-        // ===== 軌道 2：早期試單 (互斥檢查) =====
-        if (r.ma20) {
-            const dist = Math.abs(r.close - r.ma20) / r.ma20;
-            if (dist < this.EARLY_MA20_DIST
-                && r.SDV >= this.EARLY_SDV_MIN && r.SDV <= this.EARLY_SDV_MAX
-                && r.VDV >= this.EARLY_VDV_MIN && r.VDV <= this.EARLY_VDV_MAX
-                && r.d1_SDV >= 1
-                && r.d1_VDV >= 0) {
-                let hasRecent = false;
-                for (let k = Math.max(0, i - this.EARLY_MUTEX_DAYS); k < i; k++) {
-                    if (this.checkRegularSignal(ts, k)) { hasRecent = true; break; }
+        // ===== 軌道 2：早期試單（含互斥）=====
+        if (t.ma20 && t.ma20 > 0) {
+            const ma20Dist = Math.abs(t.close - t.ma20) / t.ma20;
+            if (ma20Dist < 0.015
+                && t.SDV >= 48 && t.SDV <= 58
+                && t.VDV >= 50 && t.VDV <= 65
+                && d1.SDV_1 >= 1 && d1.VDV_1 >= 0) {
+                let hasRecentRegular = false;
+                for (let k = Math.max(0, i - 3); k < i; k++) {
+                    if (this.checkRegularSignal(tsHistory, k)) {
+                        hasRecentRegular = true;
+                        break;
+                    }
                 }
-                if (!hasRecent) {
-                    return { signal: 'BUY_BASE', track: 2, type: '早期試單', score: 55,
-                             grade: 'C', size: this.EARLY_SIZE, price: r.close };
+                if (!hasRecentRegular) {
+                    return { signal: 'BUY_BASE', track: 2, type: '早期試單',
+                        score: 55, grade: 'C', size: 0.30, price: t.close };
                 }
             }
         }
@@ -374,372 +369,350 @@ class QuantDecisionEngine {
     }
 
     // ============================================================
-    // 加碼邏輯評估
+    // 步驟 7：ADV 動態風控
     // ============================================================
-    evaluateAdd(t, position, curRet) {
-        const g = position.entryGrade || 'B';
-        const a1 = position.added1 || false;
-        const a2 = position.added2 || false;
-        const a3 = position.added3 || false;
+    evaluateADVRiskControl(t, delta, position) {
+        let stopLossMode = '', stopLossRule = '', takeProfitAlert = '常態監控中', action = 'HOLD';
+        const atr = (t && Number.isFinite(t.atr)) ? t.atr : 0;
 
-        if (g === 'C') {
-            if (!a1 && curRet >= 5 && t.SDV >= 60 && t.VDV >= 60) {
-                return { stage: 1, addSize: this.EARLY_ADD_CONFIRM, price: t.close,
-                         reason: `早期試單確認加碼 (+${curRet.toFixed(1)}%)` };
+        if (!t) return { stopLossMode, stopLossRule, takeProfitAlert, action };
+
+        if (t.ADV < 40) {
+            stopLossMode = '低波動蓄勢期（窄停損）';
+            stopLossRule = `-${(2.0 * atr).toFixed(2)} 元 (2.0×ATR)`;
+        } else if (t.ADV < 60) {
+            stopLossMode = '常態順勢期（標準停損）';
+            stopLossRule = `-${(2.5 * atr).toFixed(2)} 元 (2.5×ATR)`;
+        } else {
+            stopLossMode = '高波動爆發期（移動緊縮停損）';
+            stopLossRule = `-${(3.0 * atr).toFixed(2)} 元 (3.0×ATR)`;
+        }
+
+        if (position) {
+            const curRet = (t.close / position.avgPrice - 1) * 100;
+            if (curRet >= 20) {
+                takeProfitAlert = `已達 +${curRet.toFixed(1)}% — 過熱高潮區`;
+                action = 'EXIT_FULL';
+            } else if (curRet >= 10) {
+                takeProfitAlert = `已達 +${curRet.toFixed(1)}% — 動能背離區`;
+                action = 'REDUCE_HALF';
+            } else if (curRet >= 5) {
+                takeProfitAlert = `已達 +${curRet.toFixed(1)}% — 保本鎖利區`;
             }
-            return null;
-        }
-        if (g === 'S') {
-            if (!a1 && curRet >= 4 && t.SDV >= 60 && t.VDV >= 60) {
-                return { stage: 1, addSize: 0.40, price: t.close,
-                         reason: `盤整突破確認加碼 (+${curRet.toFixed(1)}%)` };
-            }
-            return null;
         }
 
-        const s1 = g === 'A' ? this.ADD1_SIZE_A : this.ADD1_SIZE_B;
-        const s2 = g === 'A' ? this.ADD2_SIZE_A : this.ADD2_SIZE_B;
-
-        if (!a1 && curRet >= this.ADD1_RET && t.SDV >= 55 && t.VDV >= 55) {
-            return { stage: 1, addSize: s1, price: t.close, reason: `加碼1 (+${curRet.toFixed(1)}%)` };
-        }
-        if (a1 && !a2 && curRet >= this.ADD2_RET && t.SDV >= 60 && t.VDV >= 55) {
-            return { stage: 2, addSize: s2, price: t.close, reason: `加碼2 (+${curRet.toFixed(1)}%)` };
-        }
-        if (a2 && !a3 && curRet >= this.ADD3_RET && t.SDV >= 65 && t.VDV >= 55) {
-            return { stage: 3, addSize: this.ADD3_SIZE, price: t.close, reason: `加碼3 (+${curRet.toFixed(1)}%)` };
-        }
-        return null;
+        return { stopLossMode, stopLossRule, takeProfitAlert, action };
     }
 
     // ============================================================
-    // 出場邏輯評估 (四層)
+    // 步驟 8：完整回測
     // ============================================================
-    evaluateExit(t, position, i, ts) {
-        const avg = position.avgPrice;
-        const highest = Math.max(position.highest, t.high);
-        const curRet = (t.close / avg - 1) * 100;
-
-        // 第 1 層：ATR 動態停損
-        let m;
-        if (t.ADV < 40) m = 2.0;
-        else if (t.ADV < 60) m = 2.5;
-        else m = 3.0;
-        const stop = avg - m * t.atr;
-        if (t.low <= stop) {
-            return { executedPrice: Math.max(stop, t.low),
-                     reason: `ATR動態停損 (${m}×ATR)`, highest };
-        }
-
-        // 第 2 層：分階段移動停利
-        let trail = null;
-        if (curRet >= 20) trail = highest - 3.5 * t.atr;
-        else if (curRet >= 15) trail = avg * 1.08;
-        else if (curRet >= 10) trail = avg * 1.03;
-        else if (curRet >= 5) trail = avg * 1.00;
-
-        if (trail !== null && t.close <= trail) {
-            return { executedPrice: t.close,
-                     reason: `移動停利 (當前+${curRet.toFixed(1)}%)`, highest };
-        }
-
-        // 第 3 層：訊號反轉 (穿越條件)
-        if (i > 0 && ts[i - 1]) {
-            const p = ts[i - 1];
-            if (p.SDV >= 50 && t.SDV < 50 && t.VDV >= 60) {
-                return { executedPrice: t.close, reason: '訊號反轉 (SDV跌破50)', highest };
-            }
-        }
-
-        // 第 4 層：時間停損
-        const days = i - position.entryIdx;
-        if (days >= this.TIME_STOP_DAYS && curRet < this.TIME_STOP_MIN_RET) {
-            return { executedPrice: t.close, reason: `時間停損 (${days}天)`, highest };
-        }
-
-        return { executedPrice: null, reason: null, highest };
-    }
-
-    // ============================================================
-    // 回測流程
-    // ============================================================
-    runBacktest(initCapital) {
-        initCapital = initCapital || 100000;
+    runBacktest(initCash = 100000) {
         if (this.tScores.length === 0) this.calculateTScores();
         const ts = this.tScores;
         const len = ts.length;
 
-        let capital = initCapital;
+        let capital = initCash;
         let position = null;
         const trades = [];
         const signalLog = [];
-        const addLog = [];
         let cooldownUntil = -1;
         let lossStreak = 0;
 
         for (let i = 0; i < len; i++) {
             const t = ts[i];
-            if (!t || t.SDV === undefined || t.d1_SDV === undefined || t.atr === undefined) continue;
+            if (!t || i < 10) continue;
 
-            if (position) position.highest = Math.max(position.highest, t.high);
+            if (position) {
+                position.highest = Math.max(position.highest, t.high);
+            }
 
             // ===== 持倉管理 =====
             if (position) {
                 const curRet = (t.close / position.avgPrice - 1) * 100;
-                const ex = this.evaluateExit(t, position, i, ts);
-                if (ex.executedPrice !== null) {
-                    const ep = ex.executedPrice;
-                    const shares = position.shares;
-                    capital += shares * ep * (1 - this.COMMISSION - this.TAX);
-                    const retPct = (ep / position.avgPrice - 1) * 100;
+                const d1 = this.computeDelta(t, ts[i-1], ts[i-5], ts[i-10]);
+                let exitPrice = null, exitReason = null;
+
+                // 第 1 層：ATR 動態停損
+                let stopMult = t.ADV < 40 ? 2.0 : t.ADV < 60 ? 2.5 : 3.0;
+                const stopPrice = position.avgPrice - stopMult * t.atr;
+                if (t.low <= stopPrice) {
+                    exitPrice = Math.max(stopPrice, t.low);
+                    exitReason = `破位停損 (${stopMult}×ATR)`;
+                }
+
+                // 第 2 層：移動停利
+                if (!exitPrice) {
+                    let trailLevel = null;
+                    if (curRet >= 20) trailLevel = position.highest - 3.5 * t.atr;
+                    else if (curRet >= 15) trailLevel = position.avgPrice * 1.08;
+                    else if (curRet >= 10) trailLevel = position.avgPrice * 1.03;
+                    else if (curRet >= 5) trailLevel = position.avgPrice * 1.00;
+                    if (trailLevel !== null && t.close <= trailLevel) {
+                        exitPrice = t.close;
+                        exitReason = curRet >= 20
+                            ? `過熱高潮 (當前+${curRet.toFixed(1)}%)`
+                            : `動能背離 (當前+${curRet.toFixed(1)}%)`;
+                    }
+                }
+
+                // 第 3 層：訊號反轉
+                if (!exitPrice && i > 0) {
+                    const prev = ts[i-1];
+                    if (prev.SDV >= 50 && t.SDV < 50 && t.VDV >= 60) {
+                        exitPrice = t.close;
+                        exitReason = '假突破避險 (SDV跌破50)';
+                    }
+                }
+
+                // 第 4 層：時間停損
+                if (!exitPrice) {
+                    const holdDays = i - position.entryIdx;
+                    if (holdDays >= 20 && curRet < 8) {
+                        exitPrice = t.close;
+                        exitReason = `時間停損 (${holdDays}天)`;
+                    }
+                }
+
+                if (exitPrice) {
+                    const proceeds = position.shares * exitPrice * (1 - 0.001425 - 0.003);
+                    capital += proceeds;
+                    const retPct = (exitPrice / position.avgPrice - 1) * 100;
                     trades.push({
-                        entryDate: position.entryDate, entryPrice: position.avgPrice,
-                        exitDate: t.date, exitPrice: ep, shares, retPct,
-                        reason: ex.reason, grade: position.entryGrade,
-                        type: position.entryType, track: position.entryTrack,
-                        added: position.added1 || position.added2 || position.added3,
+                        entryDate: position.buyDate, entryPrice: position.avgPrice,
+                        exitDate: t.date, exitPrice: exitPrice, shares: position.shares,
+                        retPct: retPct, reason: exitReason,
+                        grade: position.entryGrade, track: position.entryTrack,
                         addCount: (position.added1 ? 1 : 0) + (position.added2 ? 1 : 0) + (position.added3 ? 1 : 0)
                     });
-                    if (retPct > 0) {
-                        lossStreak = 0;
-                        cooldownUntil = i + 1;
-                    } else {
+                    if (retPct > 0) { lossStreak = 0; cooldownUntil = i + 1; }
+                    else {
                         lossStreak++;
-                        cooldownUntil = i + (lossStreak >= 3 ? this.COOLDOWN_3 : lossStreak >= 2 ? this.COOLDOWN_2 : this.COOLDOWN_1);
+                        cooldownUntil = i + (lossStreak >= 3 ? 12 : lossStreak >= 2 ? 6 : 3);
                     }
                     position = null;
                     continue;
                 }
 
-                const add = this.evaluateAdd(t, position, curRet);
-                if (add) {
-                    const addShares = Math.floor((capital * add.addSize) / add.price);
+                // 加碼
+                const addResult = this.evaluateAdd(t, position, curRet, d1);
+                if (addResult) {
+                    const addShares = Math.floor((capital * addResult.addSize) / addResult.price);
                     if (addShares > 0) {
-                        const cost = addShares * add.price * (1 + this.COMMISSION);
+                        const cost = addShares * addResult.price * (1 + 0.001425);
                         if (cost <= capital) {
                             capital -= cost;
-                            const totS = position.shares + addShares;
-                            const totC = position.totalCost + cost;
-                            position.avgPrice = totC / totS;
-                            position.shares = totS;
-                            position.totalCost = totC;
-                            if (add.stage === 1) position.added1 = true;
-                            else if (add.stage === 2) position.added2 = true;
-                            else if (add.stage === 3) position.added3 = true;
-                            addLog.push({ date: t.date, price: add.price, shares: addShares, reason: add.reason });
+                            const newTotal = position.shares + addShares;
+                            const newCost = position.totalCost + cost;
+                            position.avgPrice = newCost / newTotal;
+                            position.shares = newTotal;
+                            position.totalCost = newCost;
+                            if (addResult.stage === 1) position.added1 = true;
+                            else if (addResult.stage === 2) position.added2 = true;
+                            else if (addResult.stage === 3) position.added3 = true;
                         }
                     }
                 }
                 continue;
             }
 
-            // ===== 空手進場判斷 =====
+            // ===== 空手：進場判斷 =====
             if (i < cooldownUntil) continue;
             if (!t.ma20) continue;
 
-            const en = this.evaluateEntry(ts, i);
-            if (en.signal === 'BUY_BASE') {
-                const shares = Math.floor((capital * en.size) / en.price);
+            const entryRes = this.evaluateEntry(ts, i);
+            if (entryRes.signal === 'BUY_BASE') {
+                const entryPrice = Number(entryRes.price);
+                if (!Number.isFinite(entryPrice) || entryPrice <= 0) continue;
+
+                const shares = Math.floor((capital * entryRes.size) / entryPrice);
                 if (shares > 0) {
-                    const cost = shares * en.price * (1 + this.COMMISSION);
+                    const cost = shares * entryPrice * (1 + 0.001425);
                     if (cost <= capital) {
                         capital -= cost;
                         position = {
-                            entryDate: t.date, avgPrice: en.price, highest: t.high,
-                            shares, totalCost: cost, entryIdx: i,
-                            entryGrade: en.grade, entryType: en.type, entryTrack: en.track,
+                            buyDate: t.date, avgPrice: entryPrice,
+                            highest: t.high, shares: shares, totalCost: cost,
+                            entryIdx: i, entryGrade: entryRes.grade,
+                            entryTrack: entryRes.track,
                             added1: false, added2: false, added3: false
                         };
                         signalLog.push({
-                            date: t.date, type: en.type, track: en.track,
-                            grade: en.grade, score: en.score, size: en.size, price: en.price
+                            date: t.date, type: entryRes.type, track: entryRes.track,
+                            grade: entryRes.grade, score: entryRes.score,
+                            size: entryRes.size, price: entryPrice
                         });
                     }
                 }
             }
         }
 
-        const last = ts[len - 1].close;
-        const finalValue = capital + (position ? position.shares * last : 0);
+        const lastPrice = ts[len - 1].close;
+        const finalValue = capital + (position ? position.shares * lastPrice : 0);
 
         return {
-            finalValue, totalReturn: (finalValue / initCapital - 1) * 100, initCapital,
-            numTrades: trades.length, trades, signalLog, addLog,
+            finalValue, totalReturn: (finalValue / initCash - 1) * 100,
+            trades, signalLog,
             openPosition: position ? {
-                entryDate: position.entryDate, entryPrice: position.avgPrice,
-                shares: position.shares, lastPrice: last,
-                unrealizedPct: (last / position.avgPrice - 1) * 100
+                entryDate: position.buyDate, entryPrice: position.avgPrice,
+                shares: position.shares, lastPrice,
+                unrealizedPct: (lastPrice / position.avgPrice - 1) * 100
             } : null
         };
     }
 
     // ============================================================
-    // 對外 API 1：最新分析結果
+    // 加碼判斷
     // ============================================================
-    getLatestAnalysis(initCapital) {
-        initCapital = initCapital || 100000;
-        if (this.tScores.length === 0) this.calculateTScores();
-        if (this.tScores.length === 0) return null;
+    evaluateAdd(t, position, curRet, d1) {
+        const grade = position.entryGrade;
+        const sdv = t.SDV, vdv = t.VDV;
+        const added1 = position.added1, added2 = position.added2, added3 = position.added3;
 
-        const backtest = this.runBacktest(initCapital);
-        const last = this.tScores[this.tScores.length - 1];
-        const decision = this.mapDecisionToUI(last, backtest);
-
-        // 判斷 ADV 爆發情緒拐點
-        let takeProfitAlert = '常態監控中';
-        let action = backtest.openPosition ? 'HOLD' : 'WAIT';
-
-        if (last.SDV >= 65 && last.ADV >= 70 && last.d1_ADV <= -3.0) {
-            takeProfitAlert = '🚨 觸發極致爆發情緒拐點 (SDV≥65, ADV≥70, Δ₁ADV≤-3.0)';
-            action = 'EXIT_FULL';
+        if (grade === 'C') {
+            if (!added1 && curRet >= 5 && sdv >= 60 && vdv >= 60) {
+                return { stage: 1, addSize: 0.40, price: t.close, reason: `早期試單確認加碼` };
+            }
+            return null;
         }
 
-        const advRiskControl = {
-            stopLossMode: this.getStopLossMode(last.ADV),
-            stopLossRule: this.getStopLossRule(last.ADV, last.atr),
-            takeProfitAlert,
-            action
-        };
+        if (grade === 'S') {
+            if (!added1 && curRet >= 4 && sdv >= 60 && vdv >= 60) {
+                return { stage: 1, addSize: 0.40, price: t.close, reason: `盤整突破確認加碼` };
+            }
+            return null;
+        }
+
+        const addSize1 = grade === 'A' ? 0.15 : 0.25;
+        const addSize2 = grade === 'A' ? 0.10 : 0.15;
+
+        if (!added1 && curRet >= 5 && sdv >= 55 && vdv >= 55) {
+            return { stage: 1, addSize: addSize1, price: t.close, reason: `加碼1` };
+        }
+        if (added1 && !added2 && curRet >= 10 && sdv >= 60 && vdv >= 55) {
+            return { stage: 2, addSize: addSize2, price: t.close, reason: `加碼2` };
+        }
+        if (added2 && !added3 && curRet >= 20 && sdv >= 65 && vdv >= 55) {
+            return { stage: 3, addSize: 0.10, price: t.close, reason: `加碼3` };
+        }
+        return null;
+    }
+
+    // ============================================================
+    // 對外 API：最新分析
+    // ============================================================
+    getLatestAnalysis() {
+        if (this.tScores.length === 0) this.calculateTScores();
+        const ts = this.tScores;
+        const len = ts.length;
+        if (len < 11) return null;
+
+        const t = ts[len - 1];
+        const d1 = this.computeDelta(t, ts[len - 2], ts[len - 6], ts[len - 11]);
+
+        const decision = this.mapDecisionToUI(t, d1);
+        const advRisk = this.evaluateADVRiskControl(t, d1, null);
 
         return {
-            current: last,
-            delta: {
-                SDV_1: last.d1_SDV, SDV_5: last.d5_SDV, SDV_10: last.d10_SDV,
-                VDV_1: last.d1_VDV, VDV_5: last.d5_VDV, VDV_10: last.d10_VDV,
-                ADV_1: last.d1_ADV, ADV_5: last.d5_ADV, ADV_10: last.d10_ADV,
-                BDV_1: last.d1_BDV, BDV_5: last.d5_BDV, BDV_10: last.d10_BDV
-            },
-            decision, backtest, advRiskControl
+            current: t,
+            delta: d1,
+            decision: decision,
+            advRiskControl: advRisk,
+            backtest: null
         };
     }
 
     // ============================================================
-    // 對外 API 2：歷史決策訊號紀錄 (近 N 日)
+    // 對外 API：歷史決策訊號
     // ============================================================
-    getHistoricalDecisionSignals(days, initCapital) {
-        days = days || 120;
-        initCapital = initCapital || 100000;
-        const backtest = this.runBacktest(initCapital);
-        const ts = this.tScores;
-        const start = Math.max(0, ts.length - days);
-        const signals = [];
+    getHistoricalDecisionSignals(days = 120) {
+        const result = this.runBacktest();
+        if (!result || !result.trades) return [];
 
-        const sigMap = new Map();
-        backtest.signalLog.forEach(s => sigMap.set(this.formatDate(s.date), s));
+        const pairs = [];
 
-        const tradeMap = new Map();
-        backtest.trades.forEach(t => {
-            tradeMap.set(this.formatDate(t.entryDate), { kind: 'ENTRY', data: t });
-            tradeMap.set(this.formatDate(t.exitDate), { kind: 'EXIT', data: t });
-        });
+        // 已平倉交易
+        for (let i = 0; i < result.trades.length; i++) {
+            const tr = result.trades[i];
+            if (!tr) continue;
 
-        for (let i = start; i < ts.length; i++) {
-            const t = ts[i];
-            const ds = this.formatDate(t.date);
-            let decision, riskAlert = '常態監控中', riskAction = 'HOLD';
+            const entryPrice = Number(tr.entryPrice);
+            const exitPrice = Number(tr.exitPrice);
+            if (!Number.isFinite(entryPrice) || !Number.isFinite(exitPrice)) continue;
 
-            const sig = sigMap.get(ds);
-            const trd = tradeMap.get(ds);
+            const retPct = Number(tr.retPct);
+            const grade = tr.grade || 'B';
+            const track = tr.track || 1;
+            const trackName = track === 1 ? '常規' : track === 2 ? '早期試單' : '盤整突破';
 
-            if (sig) {
-                const trackLabel = sig.track === 1 ? '軌1' : sig.track === 2 ? '軌2' : '軌3';
-                const color = (sig.grade === 'A' || sig.grade === 'B') ? 'red'
-                            : (sig.grade === 'C' || sig.grade === 'S') ? 'amber' : 'blue';
-                decision = {
-                    action: 'BUY',
-                    name: sig.type,
-                    signal: `${trackLabel} ${sig.grade}級 (${sig.score}分)`,
-                    color: color,
-                    desc: `${sig.type} 觸發進場，建倉比例 ${Math.round(sig.size * 100)}%`
-                };
-            } else if (trd && trd.kind === 'EXIT') {
-                const tr = trd.data;
-                const color = tr.retPct > 0 ? 'red' : 'green';
-                decision = {
-                    action: 'EXIT',
-                    name: tr.reason,
-                    signal: `${tr.retPct > 0 ? '獲利平倉' : '停損出場'} ${tr.retPct.toFixed(2)}%`,
-                    color: color,
-                    desc: `${tr.reason} @ NT$ ${tr.exitPrice.toFixed(2)}`
-                };
-                riskAction = 'EXIT_FULL';
-            } else {
-                const sdv = t.SDV;
-                let name, signal, color;
-                if (sdv >= 70) { name = '極致超買'; signal = '強勢主攻'; color = 'amber'; }
-                else if (sdv >= 60) { name = '多頭強勢'; signal = '趨勢延伸'; color = 'red'; }
-                else if (sdv >= 50) { name = '中性偏多'; signal = '溫和控盤'; color = 'blue'; }
-                else if (sdv >= 40) { name = '中性偏空'; signal = '溫和控盤'; color = 'blue'; }
-                else if (sdv >= 30) { name = '空頭強勢'; signal = '趨勢下尋'; color = 'green'; }
-                else { name = '極致超賣'; signal = '恐慌主跌'; color = 'green'; }
-                decision = { action: 'HOLD', name, signal, color, desc: `SDV ${sdv.toFixed(1)}｜${name}` };
-            }
-
-            if (t.SDV >= 65 && t.ADV >= 70 && t.d1_ADV <= -3.0) {
-                riskAlert = '🚨 情緒拐點警示';
-            }
-
-            signals.push({
-                date: ds,
-                close: t.close,
-                SDV: t.SDV,
-                VDV: t.VDV,
-                ADV: t.ADV,
-                BDV: t.BDV,
-                decision,
-                riskAlert,
-                riskAction
+            pairs.push({
+                entryDate: tr.entryDate,
+                entryPrice: entryPrice,
+                entrySignal: `${grade}級 ${trackName}`,
+                exitDate: tr.exitDate,
+                exitPrice: exitPrice,
+                exitSignal: tr.reason || '出場',
+                retPct: Number.isFinite(retPct) ? retPct : 0
             });
         }
 
-        return signals.reverse();
-    }
+        // 持倉中
+        if (result.openPosition) {
+            const op = result.openPosition;
+            const entryPrice = Number(op.entryPrice);
+            const lastPrice = Number(op.lastPrice);
+            const unrealizedPct = Number(op.unrealizedPct);
 
-    // ============================================================
-    // 輔助函式
-    // ============================================================
-    getHigh20(ts, i) {
-        if (i < 20) return null;
-        const slice = ts.slice(i - 20, i).map(d => d.close);
-        return Math.max.apply(null, slice);
-    }
-
-    formatDate(d) {
-        if (d instanceof Date) {
-            const y = d.getFullYear();
-            const m = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            return `${y}-${m}-${day}`;
+            if (Number.isFinite(entryPrice) && Number.isFinite(lastPrice)) {
+                pairs.push({
+                    entryDate: op.entryDate,
+                    entryPrice: entryPrice,
+                    entrySignal: '持倉中',
+                    exitDate: null,
+                    exitPrice: lastPrice,
+                    exitSignal: `未實現 ${unrealizedPct >= 0 ? '+' : ''}${(Number.isFinite(unrealizedPct) ? unrealizedPct : 0).toFixed(2)}%`,
+                    retPct: Number.isFinite(unrealizedPct) ? unrealizedPct : 0
+                });
+            }
         }
-        return String(d).slice(0, 10);
+
+        return pairs;
     }
 
-    mapDecisionToUI(last, backtest) {
-        const SDV = last.SDV;
-        let name, signal, color;
-        if (SDV >= 70) { name = '極致超買'; signal = '強勢主攻'; color = 'amber'; }
-        else if (SDV >= 60) { name = '多頭強勢'; signal = '趨勢延伸'; color = 'red'; }
-        else if (SDV >= 50) { name = '中性偏多'; signal = '溫和控盤'; color = 'blue'; }
-        else if (SDV >= 40) { name = '中性偏空'; signal = '溫和控盤'; color = 'blue'; }
-        else if (SDV >= 30) { name = '空頭強勢'; signal = '趨勢下尋'; color = 'green'; }
-        else { name = '極致超賣'; signal = '恐慌主跌'; color = 'green'; }
+    // ============================================================
+    // 輔助：決策映射到 UI
+    // ============================================================
+    mapDecisionToUI(t, d1) {
+        if (!t) return { action: 'HOLD', name: '無資料', signal: '等待', color: 'blue', desc: '資料不足' };
 
-        return {
-            action: backtest.openPosition ? 'HOLD' : 'WAIT',
-            name, signal, color,
-            desc: `當前 SDV 為 ${SDV.toFixed(1)}，位階判定為「${name} (${signal})」。`
-        };
-    }
+        const SDV = t.SDV;
 
-    getStopLossMode(adv) {
-        if (adv < 40) return '低波動蓄勢期 (窄停損)';
-        if (adv <= 60) return '常態順勢期 (標準停損)';
-        return '高波動爆發期 (移動緊縮停損)';
-    }
+        // 優先檢查進場訊號
+        if (this.tScores.length > 0) {
+            const entryRes = this.evaluateEntry(this.tScores, this.tScores.length - 1);
+            if (entryRes.signal === 'BUY_BASE') {
+                const gradeColor = entryRes.grade === 'A' ? 'red'
+                    : entryRes.grade === 'B' ? 'red'
+                    : entryRes.grade === 'S' ? 'amber' : 'amber';
+                return {
+                    action: 'BUY',
+                    name: `${entryRes.type} (${entryRes.grade}級)`,
+                    signal: `建議買進 ${Math.round(entryRes.size * 100)}% 倉位`,
+                    color: gradeColor,
+                    desc: `觸發${entryRes.type}訊號，評分 ${entryRes.score} 分，建議倉位 ${Math.round(entryRes.size * 100)}%`
+                };
+            }
+        }
 
-    getStopLossRule(adv, atr) {
-        if (adv < 40) return `-${(2.0 * atr).toFixed(2)} 元 (2.0×ATR)`;
-        if (adv <= 60) return `-${(2.5 * atr).toFixed(2)} 元 (2.5×ATR)`;
-        return `-${(3.0 * atr).toFixed(2)} 元 (3.0×ATR)`;
+        let name, signal, color, desc;
+        if (SDV >= 70) { name = '極致超買/強勢主攻'; signal = '警戒 — 留意反轉'; color = 'amber'; }
+        else if (SDV >= 60) { name = '多頭強勢/趨勢延伸'; signal = '續抱 — 趨勢健康'; color = 'red'; }
+        else if (SDV >= 50) { name = '中性偏多/溫和控盤'; signal = '觀望 — 多頭控盤'; color = 'blue'; }
+        else if (SDV >= 40) { name = '中性偏空/溫和控盤'; signal = '觀望 — 空頭控盤'; color = 'blue'; }
+        else if (SDV >= 30) { name = '空頭強勢/趨勢下尋'; signal = '空手 — 等待止穩'; color = 'green'; }
+        else { name = '極致超賣/恐慌主跌'; signal = '留意抄底機會'; color = 'green'; }
+
+        desc = `當前 SDV ${SDV.toFixed(1)}，系統判斷為「${name}」`;
+        return { action: 'HOLD', name, signal, color, desc };
     }
 }

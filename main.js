@@ -1,6 +1,9 @@
-// GAS API URL (更新版)
+// GAS API URL
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx5h2Ncq111yq3k6tFffiOS9m0vOBtVywbsVdfZPCHvNbSv0vIGYiC_MimgkZGV3gbP/exec";
 
+// ============================================================
+// 主流程：抓取資料 → 引擎分析 → 渲染 UI
+// ============================================================
 async function analyzeStock() {
     const codeInput = document.getElementById("stockInput");
     const code = codeInput ? codeInput.value.trim() : "2330";
@@ -29,10 +32,13 @@ async function analyzeStock() {
         updateUI(result, history, rawData.isBefore9AM, rawData.name, code);
     } catch (err) {
         console.error("API 連線失敗:", err);
-        document.getElementById("decisionDesc").innerText = "無法取得數據，請檢查網路連線或 CORS 設定。";
+        document.getElementById("decisionDesc").innerText = `無法取得數據：${err.message}`;
     }
 }
 
+// ============================================================
+// 渲染 UI
+// ============================================================
 function updateUI(res, history, isBefore9AM, stockName, code) {
     const { current, delta, decision, advRiskControl } = res;
 
@@ -43,10 +49,12 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
     `;
 
     // 價格 / 成交量
+    const close = Number(current.close);
+    const volume = Number(current.volume);
     document.getElementById("priceLabel").innerText = isBefore9AM ? "昨日 (T-1) 收盤價" : "當日 (T) 即時股價";
     document.getElementById("volumeLabel").innerText = isBefore9AM ? "昨日 (T-1) 成交量" : "當日 (T) 即時成交量";
-    document.getElementById("stockPrice").innerText = `NT$ ${current.close.toFixed(2)}`;
-    document.getElementById("stockVolume").innerText = `${Number(current.volume).toLocaleString()} 張`;
+    document.getElementById("stockPrice").innerText = `NT$ ${Number.isFinite(close) ? close.toFixed(2) : '--'}`;
+    document.getElementById("stockVolume").innerText = Number.isFinite(volume) ? `${volume.toLocaleString()} 張` : '-- 張';
 
     // 決策訊號
     document.getElementById("decisionDesc").innerText = `${decision.name}：${decision.desc}`;
@@ -71,10 +79,10 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
     updateCard("bdv", current.BDV, getBDVLevelDesc(current.BDV));
 
     // ADV 風控樞紐
-    document.getElementById("advStopLossMode").innerText = advRiskControl.stopLossMode;
-    document.getElementById("advStopLossRule").innerText = advRiskControl.stopLossRule;
+    document.getElementById("advStopLossMode").innerText = advRiskControl.stopLossMode || '--';
+    document.getElementById("advStopLossRule").innerText = advRiskControl.stopLossRule || '--';
     const tpElem = document.getElementById("advTakeProfitAlert");
-    tpElem.innerText = advRiskControl.takeProfitAlert;
+    tpElem.innerText = advRiskControl.takeProfitAlert || '常態監控中';
     tpElem.className = advRiskControl.action === "EXIT_FULL"
         ? "text-sm font-bold text-emerald-400 bg-emerald-950/50 p-2 rounded border border-emerald-500/50 animate-pulse"
         : advRiskControl.action === "REDUCE_HALF"
@@ -93,28 +101,41 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
     renderHistoryTable(history);
 }
 
+// ============================================================
+// 四指標卡片
+// ============================================================
 function updateCard(type, val, desc) {
-    document.getElementById(`${type}Value`).innerText = val.toFixed(1);
-    document.getElementById(`${type}Status`).innerText = desc;
+    const v = Number(val);
+    document.getElementById(`${type}Value`).innerText = Number.isFinite(v) ? v.toFixed(1) : '--';
+    document.getElementById(`${type}Status`).innerText = desc || '--';
 }
 
+// ============================================================
+// Δ 動能矩陣列
+// ============================================================
 function renderRow(label, curr, d1, d5, d10) {
-    const formatD = (val) => {
-        const color = val > 0 ? "text-rose-400" : val < 0 ? "text-emerald-400" : "text-slate-400";
-        const sign = val > 0 ? "+" : "";
-        return `<span class="${color}">${sign}${val.toFixed(1)}</span>`;
+    const fmt = (val) => {
+        const v = Number(val);
+        if (!Number.isFinite(v)) return '<span class="text-slate-400">--</span>';
+        const color = v > 0 ? "text-rose-400" : v < 0 ? "text-emerald-400" : "text-slate-400";
+        const sign = v > 0 ? "+" : "";
+        return `<span class="${color}">${sign}${v.toFixed(1)}</span>`;
     };
+    const currVal = Number(curr);
     return `
         <tr class="hover:bg-slate-700/30 transition">
             <td class="p-3 text-left font-bold text-slate-300">${label}</td>
-            <td class="p-3 font-bold">${curr.toFixed(1)}</td>
-            <td class="p-3">${formatD(d1)}</td>
-            <td class="p-3">${formatD(d5)}</td>
-            <td class="p-3">${formatD(d10)}</td>
+            <td class="p-3 font-bold">${Number.isFinite(currVal) ? currVal.toFixed(1) : '--'}</td>
+            <td class="p-3">${fmt(d1)}</td>
+            <td class="p-3">${fmt(d5)}</td>
+            <td class="p-3">${fmt(d10)}</td>
         </tr>
     `;
 }
 
+// ============================================================
+// 歷史交易紀錄（防禦性版本）
+// ============================================================
 function renderHistoryTable(history) {
     const tbody = document.getElementById("historyTableBody");
     if (!tbody) return;
@@ -125,35 +146,54 @@ function renderHistoryTable(history) {
         return;
     }
 
+    const safeNum = (v) => {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+    };
+    const fmtPrice = (v) => {
+        const n = safeNum(v);
+        return n !== null ? `NT$ ${n.toFixed(2)}` : '—';
+    };
+
     let buyCount = 0, exitCount = 0, winCount = 0, lossCount = 0;
 
     tbody.innerHTML = history.map(item => {
+        if (!item) return '';
+
+        const entryPrice = safeNum(item.entryPrice);
+        const exitPrice = safeNum(item.exitPrice);
+        const retPct = safeNum(item.retPct);
+
+        if (entryPrice === null && exitPrice === null) return '';
+
         const isOpen = !item.exitDate;
         if (item.entryDate) buyCount++;
         if (item.exitDate) exitCount++;
-        if (item.retPct > 0) winCount++;
-        else if (item.retPct <= 0 && item.exitDate) lossCount++;
-
-        const retColor = item.retPct > 0 ? "text-rose-400" : item.retPct < 0 ? "text-emerald-400" : "text-slate-400";
-        const retSign = item.retPct > 0 ? "+" : "";
-        const entryColor = item.entrySignal && item.entrySignal.includes('A級') ? "bg-rose-500/20 text-rose-400 border border-rose-500/30"
-            : item.entrySignal && item.entrySignal.includes('B級') ? "bg-sky-500/20 text-sky-400 border border-sky-500/30"
-            : "bg-amber-500/20 text-amber-400 border border-amber-500/30";
-
-        const exitColor = item.exitDate
-            ? (item.retPct > 0 ? "bg-rose-500/20 text-rose-400 border border-rose-500/30" : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30")
-            : "bg-slate-700 text-slate-300";
+        if (retPct !== null && retPct > 0) winCount++;
+        else if (retPct !== null && retPct <= 0 && item.exitDate) lossCount++;
 
         const ed = item.entryDate ? String(item.entryDate).slice(0, 10) : '--';
         const xd = item.exitDate ? String(item.exitDate).slice(0, 10) : '持倉中';
 
+        let entryColor = "bg-slate-700 text-slate-300";
+        const entrySig = String(item.entrySignal || '');
+        if (entrySig.includes('A級')) entryColor = "bg-rose-500/20 text-rose-400 border border-rose-500/30";
+        else if (entrySig.includes('B級')) entryColor = "bg-sky-500/20 text-sky-400 border border-sky-500/30";
+        else if (entrySig.includes('C級') || entrySig.includes('S級')) entryColor = "bg-amber-500/20 text-amber-400 border border-amber-500/30";
+
+        let exitColor = "bg-slate-700 text-slate-300";
+        if (item.exitDate) {
+            if (retPct !== null && retPct > 0) exitColor = "bg-rose-500/20 text-rose-400 border border-rose-500/30";
+            else exitColor = "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+        }
+
         return `
             <tr class="hover:bg-slate-700/40 border-b border-slate-700/40 transition">
                 <td class="p-3 font-mono text-slate-300 text-xs">${ed}</td>
-                <td class="p-3 font-mono font-bold text-slate-200">NT$ ${item.entryPrice.toFixed(2)}</td>
+                <td class="p-3 font-mono font-bold text-slate-200">${fmtPrice(entryPrice)}</td>
                 <td class="p-3 border-r border-slate-700"><span class="px-2 py-1 rounded text-xs font-bold ${entryColor}">${item.entrySignal || '--'}</span></td>
                 <td class="p-3 font-mono text-slate-300 text-xs">${xd}</td>
-                <td class="p-3 font-mono font-bold text-slate-200">NT$ ${item.exitPrice.toFixed(2)}</td>
+                <td class="p-3 font-mono font-bold text-slate-200">${fmtPrice(exitPrice)}</td>
                 <td class="p-3"><span class="px-2 py-1 rounded text-xs font-bold ${exitColor}">${item.exitSignal || '--'}</span></td>
             </tr>
         `;
@@ -164,40 +204,50 @@ function renderHistoryTable(history) {
         `近 6 個月：${buyCount} 筆買入、${exitCount} 筆出場、勝率 ${winRate}%`;
 }
 
+// ============================================================
 // 四大指標位階定義
+// ============================================================
 function getSDVLevelDesc(val) {
-    if (val >= 70) return "≥70 極致超買/強勢主攻";
-    if (val >= 60) return "60~69 多頭強勢/趨勢延伸";
-    if (val >= 50) return "50~59 中性偏多/溫和控盤";
-    if (val >= 40) return "40~49 中性偏空/溫和控盤";
-    if (val >= 30) return "30~39 空頭強勢/趨勢下尋";
+    const v = Number(val);
+    if (!Number.isFinite(v)) return '--';
+    if (v >= 70) return "≥70 極致超買/強勢主攻";
+    if (v >= 60) return "60~69 多頭強勢/趨勢延伸";
+    if (v >= 50) return "50~59 中性偏多/溫和控盤";
+    if (v >= 40) return "40~49 中性偏空/溫和控盤";
+    if (v >= 30) return "30~39 空頭強勢/趨勢下尋";
     return "<30 極致超賣/恐慌主跌";
 }
 
 function getVDVLevelDesc(val) {
-    if (val >= 70) return "≥70 極致爆量/天量換手";
-    if (val >= 60) return "60~69 顯著放量/資金積極";
-    if (val >= 50) return "50~59 常態量能/資金中性";
-    if (val >= 40) return "40~49 量能微縮/資金觀望";
-    if (val >= 30) return "30~39 低迷量能/顯著縮量";
+    const v = Number(val);
+    if (!Number.isFinite(v)) return '--';
+    if (v >= 70) return "≥70 極致爆量/天量換手";
+    if (v >= 60) return "60~69 顯著放量/資金積極";
+    if (v >= 50) return "50~59 常態量能/資金中性";
+    if (v >= 40) return "40~49 量能微縮/資金觀望";
+    if (v >= 30) return "30~39 低迷量能/顯著縮量";
     return "<30 極致窒息量/量能冰點";
 }
 
 function getADVLevelDesc(val) {
-    if (val >= 70) return "≥70 極致劇烈/高風險暴甩";
-    if (val >= 60) return "60~69 波動擴大/風險升溫";
-    if (val >= 50) return "50~59 中度波動/風險適性";
-    if (val >= 40) return "40~49 波動收斂/風險偏低";
-    if (val >= 30) return "30~39 低度波動/市場沉寂";
+    const v = Number(val);
+    if (!Number.isFinite(v)) return '--';
+    if (v >= 70) return "≥70 極致劇烈/高風險暴甩";
+    if (v >= 60) return "60~69 波動擴大/風險升溫";
+    if (v >= 50) return "50~59 中度波動/風險適性";
+    if (v >= 40) return "40~49 波動收斂/風險偏低";
+    if (v >= 30) return "30~39 低度波動/市場沉寂";
     return "<30 極致平靜/波動死寂";
 }
 
 function getBDVLevelDesc(val) {
-    if (val >= 70) return "≥70 極致擴張/通道張裂頂點";
-    if (val >= 60) return "60~69 通道擴張/主升(跌)段";
-    if (val >= 50) return "50~59 中軸運作/態勢緩和";
-    if (val >= 40) return "40~49 通道收縮/區間盤整";
-    if (val >= 30) return "30~39 高度擠壓/變盤蓄勢";
+    const v = Number(val);
+    if (!Number.isFinite(v)) return '--';
+    if (v >= 70) return "≥70 極致擴張/通道張裂頂點";
+    if (v >= 60) return "60~69 通道擴張/主升(跌)段";
+    if (v >= 50) return "50~59 中軸運作/態勢緩和";
+    if (v >= 40) return "40~49 通道收縮/區間盤整";
+    if (v >= 30) return "30~39 高度擠壓/變盤蓄勢";
     return "<30 極致收縮/Squeeze臨界";
 }
 
