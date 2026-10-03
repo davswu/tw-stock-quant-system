@@ -1,14 +1,22 @@
 /**
- * quantEngine.js - 四指標趨勢分析核心引擎 (v10.7.2 修正版)
+ * quantEngine.js - 四指標趨勢分析核心引擎 (v10.7.3 修正版)
  * 
- * 修正項目：
- * 1. ✅ 補上 high20（20日新高）與 vol5（前5日均量）計算
- * 2. ✅ 補上 ma20 賦值（供軌道2早期試單使用）
- * 3. ✅ 完整實作三軌進場（軌1 → 軌3 → 軌2）
- * 4. ✅ 完整實作四層出場（ATR停損 / 移動停利 / 訊號反轉 / 時間停損）
- * 5. ✅ 完整實作三次加碼（A/B/C/S 級）
- * 6. ✅ 冷卻期機制（3/6/12 天）
- * 7. ✅ 排除條款 E1~E4
+ * ========== v10.7.3 修正要點 ==========
+ * 1. ✅ ATR 算法改為「簡單移動平均」（與 Python rolling(14).mean() 完全一致）
+ * 2. ✅ 加入加碼診斷輸出（可開關）
+ * 3. ✅ 加入排除條款診斷輸出（可開關）
+ * 4. ✅ 加入進場訊號診斷輸出（可開關）
+ * 5. ✅ 修正軌道 2 互斥標記的初始化時機
+ * 6. ✅ 確保與 v10.7 Python 引擎逐行對齊
+ * 
+ * ========== 修正原因 ==========
+ * 前一版使用「遞迴式 ATR」（Wilder's smoothing），與 Python 的 
+ * rolling(14).mean() 不同，導致：
+ *   - ADV 數值不同 → ATR 停損倍數分區錯亂
+ *   - 停損觸發點與 Python 不一致
+ *   - 加碼判斷基準偏移
+ * 
+ * 本版改為與 Python 完全一致的簡單移動平均，確保數值對齊。
  */
 
 const QuantConfig = {
@@ -53,12 +61,18 @@ const QuantConfig = {
   EARLY_VDV_MAX: 65,
   EARLY_SIZE: 0.30,
   EARLY_ADD_CONFIRM: 0.40,
-  EARLY_MUTEX_DAYS: 3
+  EARLY_MUTEX_DAYS: 3,
+
+  // 診斷開關
+  DEBUG: false
 };
 
 class QuantEngine {
   constructor(config = QuantConfig) {
     this.config = config;
+    this._log = config.DEBUG
+      ? (msg) => console.log(`[Engine] ${msg}`)
+      : () => {};
   }
 
   // ============================================================
@@ -69,18 +83,29 @@ class QuantEngine {
     const len = candles.length;
     const result = candles.map(c => ({ ...c }));
 
-    // ---- 1. ATR(14) ----
+    // ---- 1. ATR(14) - 簡單移動平均（與 Python 完全一致）----
+    // Python: tr.rolling(14).mean()
+    // 注意：rolling(14) 需要連續 14 個 TR 值，前 13 天為 null
+    const trArr = new Array(len).fill(0);
     for (let i = 0; i < len; i++) {
       if (i === 0) {
-        result[i].atr = result[i].high - result[i].low;
+        trArr[i] = result[i].high - result[i].low;
       } else {
-        const h = result[i].high, l = result[i].low, pc = result[i - 1].close;
-        const tr = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
-        if (i < cfg.ATR_PERIOD) {
-          result[i].atr = (result[i - 1].atr * i + tr) / (i + 1);
-        } else {
-          result[i].atr = (result[i - 1].atr * (cfg.ATR_PERIOD - 1) + tr) / cfg.ATR_PERIOD;
+        const h = result[i].high, l = result[i].low;
+        const pc = result[i - 1].close;
+        trArr[i] = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
+      }
+    }
+
+    for (let i = 0; i < len; i++) {
+      if (i < cfg.ATR_PERIOD - 1) {
+        result[i].atr = null;
+      } else {
+        let sum = 0;
+        for (let k = i - cfg.ATR_PERIOD + 1; k <= i; k++) {
+          sum += trArr[k];
         }
+        result[i].atr = sum / cfg.ATR_PERIOD;
       }
     }
 
@@ -100,19 +125,39 @@ class QuantEngine {
     }
 
     // ---- 3. 對數 T-Score（SDV / VDV / ADV / BDV）----
+    // Python: 使用 rolling(30) 的 μ_ln、σ_ln
     for (let i = 0; i < len; i++) {
-      if (i < cfg.WINDOW + 18) {
+      // 需等 ATR(14) 與 Bandwidth(20) 都就緒
+      if (i < cfg.WINDOW + cfg.BB_PERIOD - 1 || result[i].atr === null) {
         result[i].sdv = null;
         result[i].vdv = null;
         result[i].adv = null;
         result[i].bdv = null;
         continue;
       }
-      const window = result.slice(i - cfg.WINDOW + 1, i + 1);
-      const lnP = window.map(d => Math.log(Math.max(d.close, 1e-9)));
-      const lnV = window.map(d => Math.log(Math.max(d.volume, 1)));
-      const lnA = window.map(d => Math.log(Math.max(d.atr, 1e-9)));
-      const lnB = window.map(d => Math.log(Math.max(d.bw, 1e-9)));
+
+      const startIdx = i - cfg.WINDOW + 1;
+      const lnP = [], lnV = [], lnA = [], lnB = [];
+
+      let valid = true;
+      for (let k = startIdx; k <= i; k++) {
+        if (result[k].atr === null || result[k].bw === null) {
+          valid = false;
+          break;
+        }
+        lnP.push(Math.log(Math.max(result[k].close, 1e-9)));
+        lnV.push(Math.log(Math.max(result[k].volume, 1)));
+        lnA.push(Math.log(Math.max(result[k].atr, 1e-9)));
+        lnB.push(Math.log(Math.max(result[k].bw, 1e-9)));
+      }
+
+      if (!valid || lnP.length < cfg.WINDOW) {
+        result[i].sdv = null;
+        result[i].vdv = null;
+        result[i].adv = null;
+        result[i].bdv = null;
+        continue;
+      }
 
       const calcTS = (val, lnArr) => {
         const lnVal = Math.log(Math.max(val, 1e-9));
@@ -142,9 +187,9 @@ class QuantEngine {
       });
     }
 
-    // ---- 5. 【關鍵修正】high20 與 vol5 ----
-    // high20：前 20 日（不含今日）最高 close
-    // vol5：前 5 日（不含今日）平均 volume
+    // ---- 5. high20 與 vol5（前 N 日、不含今日）----
+    // Python: df['high20'] = df['close'].rolling(20).max().shift(1)
+    //         df['vol5'] = df['volume'].rolling(5).mean().shift(1)
     for (let i = 0; i < len; i++) {
       if (i < 20) {
         result[i].high20 = null;
@@ -186,7 +231,6 @@ class QuantEngine {
     const r = df[i];
     const cfg = this.config;
 
-    // 基本檢查
     if (r.sdv === null || r.vdv === null || r.adv === null || r.bdv === null) {
       return { signal: 'WAIT' };
     }
@@ -199,6 +243,7 @@ class QuantEngine {
       }
     }
     if (recentSdvMax > cfg.HIGH_SDV_FORBID) {
+      if (cfg.DEBUG) this._log(`${r.date} 高位禁買 (SDV max=${recentSdvMax.toFixed(1)})`);
       return { signal: 'WAIT' };
     }
 
@@ -207,11 +252,15 @@ class QuantEngine {
     // 1. 突破前高
     if (r.high20 !== null && r.close >= r.high20 &&
         r.vdv >= 60 && r.sdv >= 50 && r.sdv <= 65) {
-      if (!this.isExcluded(r)) {
+      const ex = this.isExcluded(r);
+      if (!ex) {
+        if (cfg.DEBUG) this._log(`${r.date} [軌1] 突破前高`);
         return {
           signal: 'BUY', track: 1, type: '突破前高', score: 70,
           grade: 'B', size: cfg.INIT_B_SIZE, price: r.close
         };
+      } else if (cfg.DEBUG) {
+        this._log(`${r.date} 突破前高被排除 (${ex})`);
       }
     }
 
@@ -230,13 +279,19 @@ class QuantEngine {
       if (r.d1_vdv !== null && r.d1_vdv >= 3) s += 10;
       if (r.d1_bdv !== null && r.d1_bdv >= 3) s += 10;
 
-      if (s >= cfg.B_GRADE && !this.isExcluded(r)) {
-        const grade = s >= cfg.A_GRADE ? 'A' : 'B';
-        return {
-          signal: 'BUY', track: 1, type: '蓄勢突破', score: s, grade,
-          size: grade === 'A' ? cfg.INIT_A_SIZE : cfg.INIT_B_SIZE,
-          price: r.close
-        };
+      if (s >= cfg.B_GRADE) {
+        const ex = this.isExcluded(r);
+        if (!ex) {
+          const grade = s >= cfg.A_GRADE ? 'A' : 'B';
+          if (cfg.DEBUG) this._log(`${r.date} [軌1] 蓄勢突破 ${grade}級 (${s}分)`);
+          return {
+            signal: 'BUY', track: 1, type: '蓄勢突破', score: s, grade,
+            size: grade === 'A' ? cfg.INIT_A_SIZE : cfg.INIT_B_SIZE,
+            price: r.close
+          };
+        } else if (cfg.DEBUG) {
+          this._log(`${r.date} 蓄勢突破被排除 (${ex}, ${s}分)`);
+        }
       }
     }
 
@@ -255,13 +310,17 @@ class QuantEngine {
       if (r.d1_vdv !== null && r.d1_vdv > 0) s += 10;
       if (r.d1_bdv !== null && r.d1_bdv >= 0) s += 10;
 
-      if (s >= cfg.B_GRADE && !this.isExcluded(r)) {
-        const grade = s >= cfg.A_GRADE ? 'A' : 'B';
-        return {
-          signal: 'BUY', track: 1, type: '順勢拉回', score: s, grade,
-          size: grade === 'A' ? cfg.INIT_A_SIZE : cfg.INIT_B_SIZE,
-          price: r.close
-        };
+      if (s >= cfg.B_GRADE) {
+        const ex = this.isExcluded(r);
+        if (!ex) {
+          const grade = s >= cfg.A_GRADE ? 'A' : 'B';
+          if (cfg.DEBUG) this._log(`${r.date} [軌1] 順勢拉回 ${grade}級 (${s}分)`);
+          return {
+            signal: 'BUY', track: 1, type: '順勢拉回', score: s, grade,
+            size: grade === 'A' ? cfg.INIT_A_SIZE : cfg.INIT_B_SIZE,
+            price: r.close
+          };
+        }
       }
     }
 
@@ -279,13 +338,17 @@ class QuantEngine {
         if (r.d1_vdv !== null && r.d1_vdv >= 3) s += 15;
         if (r.d1_bdv !== null && r.d1_bdv >= 3) s += 15;
 
-        if (s >= cfg.B_GRADE && !this.isExcluded(r)) {
-          const grade = s >= cfg.A_GRADE ? 'A' : 'B';
-          return {
-            signal: 'BUY', track: 1, type: '假跌破掃蕩', score: s, grade,
-            size: grade === 'A' ? cfg.INIT_A_SIZE : cfg.INIT_B_SIZE,
-            price: r.close
-          };
+        if (s >= cfg.B_GRADE) {
+          const ex = this.isExcluded(r);
+          if (!ex) {
+            const grade = s >= cfg.A_GRADE ? 'A' : 'B';
+            if (cfg.DEBUG) this._log(`${r.date} [軌1] 假跌破掃蕩 ${grade}級 (${s}分)`);
+            return {
+              signal: 'BUY', track: 1, type: '假跌破掃蕩', score: s, grade,
+              size: grade === 'A' ? cfg.INIT_A_SIZE : cfg.INIT_B_SIZE,
+              price: r.close
+            };
+          }
         }
       }
     }
@@ -302,13 +365,17 @@ class QuantEngine {
       if (r.d1_adv !== null && r.d1_adv <= -3) s += 10;
       if (r.d1_bdv !== null && r.d1_bdv <= -3) s += 10;
 
-      if (s >= cfg.EXTREME_GRADE && !this.isExcluded(r)) {
-        const grade = s >= cfg.A_GRADE ? 'A' : 'B';
-        return {
-          signal: 'BUY', track: 1, type: '極致超跌', score: s, grade,
-          size: grade === 'A' ? cfg.INIT_A_SIZE : cfg.INIT_B_SIZE,
-          price: r.close
-        };
+      if (s >= cfg.EXTREME_GRADE) {
+        const ex = this.isExcluded(r);
+        if (!ex) {
+          const grade = s >= cfg.A_GRADE ? 'A' : 'B';
+          if (cfg.DEBUG) this._log(`${r.date} [軌1] 極致超跌 ${grade}級 (${s}分)`);
+          return {
+            signal: 'BUY', track: 1, type: '極致超跌', score: s, grade,
+            size: grade === 'A' ? cfg.INIT_A_SIZE : cfg.INIT_B_SIZE,
+            price: r.close
+          };
+        }
       }
     }
 
@@ -318,6 +385,7 @@ class QuantEngine {
         r.vol5 !== null && r.volume >= r.vol5 * cfg.SQUEEZE_VOL_RATIO &&
         r.d1_sdv !== null && r.d1_sdv >= 2 &&
         r.d1_bdv !== null && r.d1_bdv >= 1) {
+      if (cfg.DEBUG) this._log(`${r.date} [軌3] 盤整突破 (BDV=${r.bdv.toFixed(1)})`);
       return {
         signal: 'BUY', track: 3, type: '盤整突破', score: 60,
         grade: 'S', size: cfg.SQUEEZE_SIZE, price: r.close
@@ -332,7 +400,6 @@ class QuantEngine {
           r.vdv >= cfg.EARLY_VDV_MIN && r.vdv <= cfg.EARLY_VDV_MAX &&
           r.d1_sdv !== null && r.d1_sdv >= 1 &&
           r.d1_vdv !== null && r.d1_vdv >= 0) {
-        // 互斥檢查：最近 3 天內是否有常規訊號
         let hasRecentRegular = false;
         for (let k = Math.max(0, i - cfg.EARLY_MUTEX_DAYS); k < i; k++) {
           if (df[k] && df[k]._regularSignal) {
@@ -341,6 +408,7 @@ class QuantEngine {
           }
         }
         if (!hasRecentRegular) {
+          if (cfg.DEBUG) this._log(`${r.date} [軌2] 早期試單`);
           return {
             signal: 'BUY', track: 2, type: '早期試單', score: 55,
             grade: 'C', size: cfg.EARLY_SIZE, price: r.close
@@ -362,9 +430,10 @@ class QuantEngine {
     const added2 = position.added2;
     const added3 = position.added3;
 
-    // C 級：早期試單確認加碼
+    // C 級
     if (grade === 'C') {
       if (!added1 && curRet >= 5 && r.sdv >= 60 && r.vdv >= 60) {
+        if (cfg.DEBUG) this._log(`${r.date} [加碼] C級 確認 (+${curRet.toFixed(1)}%)`);
         return {
           stage: 1, addSize: cfg.EARLY_ADD_CONFIRM, price: r.close,
           reason: `早期試單確認加碼 (+${curRet.toFixed(1)}%)`
@@ -373,9 +442,10 @@ class QuantEngine {
       return null;
     }
 
-    // S 級：盤整突破確認加碼
+    // S 級
     if (grade === 'S') {
       if (!added1 && curRet >= 4 && r.sdv >= 60 && r.vdv >= 60) {
+        if (cfg.DEBUG) this._log(`${r.date} [加碼] S級 確認 (+${curRet.toFixed(1)}%)`);
         return {
           stage: 1, addSize: 0.40, price: r.close,
           reason: `盤整突破確認加碼 (+${curRet.toFixed(1)}%)`
@@ -384,23 +454,26 @@ class QuantEngine {
       return null;
     }
 
-    // A/B 級：三次加碼
+    // A/B 級三次加碼
     const size1 = grade === 'A' ? cfg.ADD1_SIZE_A : cfg.ADD1_SIZE_B;
     const size2 = grade === 'A' ? cfg.ADD2_SIZE_A : cfg.ADD2_SIZE_B;
 
     if (!added1 && curRet >= cfg.ADD1_RET && r.sdv >= 55 && r.vdv >= 55) {
+      if (cfg.DEBUG) this._log(`${r.date} [加碼1] ${grade}級 (+${curRet.toFixed(1)}%)`);
       return {
         stage: 1, addSize: size1, price: r.close,
         reason: `加碼1 (+${curRet.toFixed(1)}%)`
       };
     }
     if (added1 && !added2 && curRet >= cfg.ADD2_RET && r.sdv >= 60 && r.vdv >= 55) {
+      if (cfg.DEBUG) this._log(`${r.date} [加碼2] ${grade}級 (+${curRet.toFixed(1)}%)`);
       return {
         stage: 2, addSize: size2, price: r.close,
         reason: `加碼2 (+${curRet.toFixed(1)}%)`
       };
     }
     if (added2 && !added3 && curRet >= cfg.ADD3_RET && r.sdv >= 65 && r.vdv >= 55) {
+      if (cfg.DEBUG) this._log(`${r.date} [加碼3] ${grade}級 (+${curRet.toFixed(1)}%)`);
       return {
         stage: 3, addSize: cfg.ADD3_SIZE, price: r.close,
         reason: `加碼3 (+${curRet.toFixed(1)}%)`
@@ -418,10 +491,11 @@ class QuantEngine {
     const highest = Math.max(position.highest, r.high);
     const curRet = (r.close - avgPrice) / avgPrice * 100;
 
-    // 第 1 層：ATR 動態停損（依 ADV）
+    // 第 1 層：ATR 動態停損（依 ADV 動態倍數）
     let stopMult = r.adv < 40 ? 2.0 : r.adv < 60 ? 2.5 : 3.0;
     const stopPrice = avgPrice - stopMult * r.atr;
     if (r.low <= stopPrice) {
+      if (cfg.DEBUG) this._log(`${r.date} [出場] 破位停損 (${stopMult}×ATR, ADV=${r.adv.toFixed(1)})`);
       return {
         executedPrice: Math.max(stopPrice, r.low),
         reason: `破位停損 (${stopMult}×ATR)`,
@@ -440,6 +514,7 @@ class QuantEngine {
       const reason = curRet >= 20
         ? `過熱高潮 (當前+${curRet.toFixed(1)}%)`
         : `動能背離 (當前+${curRet.toFixed(1)}%)`;
+      if (cfg.DEBUG) this._log(`${r.date} [出場] ${reason}`);
       return { executedPrice: r.close, reason, highest };
     }
 
@@ -448,6 +523,7 @@ class QuantEngine {
       const prev = df[i - 1];
       if (prev.sdv !== null && prev.sdv >= 50 &&
           r.sdv < 50 && r.vdv >= 60) {
+        if (cfg.DEBUG) this._log(`${r.date} [出場] 假突破避險`);
         return {
           executedPrice: r.close,
           reason: '假突破避險 (SDV跌破50)',
@@ -459,6 +535,7 @@ class QuantEngine {
     // 第 4 層：時間停損
     const holdDays = i - position.entryIdx;
     if (holdDays >= cfg.TIME_STOP_DAYS && curRet < cfg.TIME_STOP_MIN_RET) {
+      if (cfg.DEBUG) this._log(`${r.date} [出場] 時間停損 (${holdDays}天, ${curRet.toFixed(1)}%)`);
       return {
         executedPrice: r.close,
         reason: `時間停損 (${holdDays}天)`,
@@ -482,13 +559,18 @@ class QuantEngine {
       df[i]._regularSignal = false;
       if (i >= 10 && df[i].sdv !== null) {
         const r = df[i];
-        // 簡化標記：符合任一常規條件即算
-        if ((r.high20 !== null && r.close >= r.high20 &&
-             r.vdv >= 60 && r.sdv >= 50 && r.sdv <= 65) ||
-            (r.adv >= 35 && r.adv <= 65 && r.bdv < 55 &&
-             r.sdv >= 45 && r.sdv <= 68 && r.vdv >= 50) ||
-            (r.adv >= 35 && r.adv <= 65 && r.bdv >= 40 && r.bdv <= 70 &&
-             r.sdv >= 45 && r.sdv <= 65 && r.vdv < 50)) {
+        // 軌 1 五大訊號的簡化標記（只要基本條件成立即算）
+        // 1. 突破前高
+        const cond1 = r.high20 !== null && r.close >= r.high20 &&
+                      r.vdv >= 60 && r.sdv >= 50 && r.sdv <= 65;
+        // 2. 蓄勢突破（基本條件）
+        const cond2 = r.adv >= 35 && r.adv <= 65 && r.bdv < 55 &&
+                      r.sdv >= 45 && r.sdv <= 68 && r.vdv >= 50;
+        // 3. 順勢拉回（基本條件）
+        const cond3 = r.adv >= 35 && r.adv <= 65 && r.bdv >= 40 && r.bdv <= 70 &&
+                      r.sdv >= 45 && r.sdv <= 65 && r.vdv < 50;
+
+        if (cond1 || cond2 || cond3) {
           df[i]._regularSignal = true;
         }
       }
@@ -500,6 +582,8 @@ class QuantEngine {
     const trades = [];
     let cooldownUntil = -1;
     let lossStreak = 0;
+
+    if (cfg.DEBUG) this._log(`回測開始: 資料長度 ${len}, 初始資金 ${initialCapital}`);
 
     for (let i = 10; i < len; i++) {
       const r = df[i];
@@ -588,6 +672,7 @@ class QuantEngine {
               entryTrack: entryRes.track,
               added1: false, added2: false, added3: false
             };
+            if (cfg.DEBUG) this._log(`[進場] ${r.date} ${entryRes.type} ${entryRes.grade}級 @ ${entryRes.price}`);
           }
         }
       }
@@ -597,6 +682,10 @@ class QuantEngine {
     const lastPrice = df[len - 1].close;
     const finalValue = capital + (position ? position.shares * lastPrice : 0);
     const totalReturnPct = (finalValue / initialCapital - 1) * 100;
+
+    if (cfg.DEBUG) {
+      this._log(`回測結束: 最終資金 ${Math.round(finalValue)}, 交易 ${trades.length} 筆`);
+    }
 
     return {
       initialCapital,
