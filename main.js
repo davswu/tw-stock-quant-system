@@ -27,6 +27,18 @@ async function analyzeStock() {
     try {
         const res = await fetch(`${GAS_API_URL}?code=${encodeURIComponent(code)}`);
         const rawData = await res.json();
+const rawData = await res.json();
+
+// ===== 暫時的診斷日誌 =====
+console.log("=== API 原始回應 ===");
+console.log("status:", rawData.status);
+console.log("name:", rawData.name);
+console.log("data 是否為陣列:", Array.isArray(rawData.data));
+console.log("資料筆數:", rawData.data ? rawData.data.length : 'N/A');
+console.log("第一筆原始資料:", JSON.stringify(rawData.data ? rawData.data[0] : null));
+console.log("第一筆的鍵:", rawData.data && rawData.data[0] ? Object.keys(rawData.data[0]) : 'N/A');
+console.log("最後一筆原始資料:", JSON.stringify(rawData.data && rawData.data.length > 0 ? rawData.data[rawData.data.length - 1] : null));
+// ===== 診斷結束 =====
 
         if (!rawData || rawData.status === "error" || !rawData.data || rawData.data.length === 0) {
             setText("decisionDesc", rawData.message || `無法取得 ${code} 行情，請確認股票代碼。`);
