@@ -4,7 +4,7 @@
  * GAS API URL 已更新
  */
 
-const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx5h2Ncq111yq3k6tFffiOS9m0vOBtVywbsVdfZPCHvNbSv0vIGYiC_MimgkZGV3gbP/exec";
+const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx6sVnxWQJo-JT-SnhwRGbkoc85ADc9syU3Nzy7zAI/dev";
 
 // 初始化引擎
 const engine = new QuantEngine();
