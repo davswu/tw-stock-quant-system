@@ -1,14 +1,11 @@
 /**
- * main.js - 四指標趨勢分析 UI 控制器 (v10.7.2 對齊版)
- * 
- * 完整對齊《四指標趨勢分析說明文案 v10.7.2》與 quantEngine.js v10.7.3
- * 
- * GAS API URL: 已更新為最新部署版本
+ * main.js - 四指標趨勢分析 UI 控制器 (v10.8 定版)
+ * 完整對齊《四指標趨勢分析說明文案 v10.7.2 終版》與 quantEngine.js v10.8
  */
 
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx5h2Ncq111yq3k6tFffiOS9m0vOBtVywbsVdfZPCHvNbSv0vIGYiC_MimgkZGV3gbP/exec";
 
-// 初始化量化引擎（如需診斷，改為 { ...QuantConfig, DEBUG: true }）
+// 初始化量化引擎（如需診斷，將 DEBUG 設為 true）
 const engine = new QuantEngine();
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -21,7 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
 async function analyzeStock() {
   const elStockInput = document.getElementById('stockInput');
   const elDesc = document.getElementById('decisionDesc');
-  const stockCode = elStockInput ? elStockInput.value.trim() || '2330' : '2330';
+  const stockCode = elStockInput ? elStockInput.value.trim() || '8150' : '8150';
 
   if (elDesc) {
     elDesc.textContent = `⏳ 正連線 GAS API 抓取 [${stockCode}] 行情數據中...`;
@@ -140,7 +137,6 @@ function renderSignalBadge(candles) {
     return;
   }
 
-  // 呼叫引擎取得決策
   const decision = engine.evaluateEntrySignal(candles, idx);
 
   // ===== 訊號觸發 =====
@@ -248,11 +244,10 @@ function renderAdvRiskHub(candles) {
     return;
   }
 
-  // ===== 第 1 層：ATR 動態停損（依 ADV 動態倍數）=====
+  // 第 1 層：ATR 動態停損（依 ADV 動態倍數）
   let stopMult = last.adv < 40 ? 2.0 : last.adv < 60 ? 2.5 : 3.0;
   const stopPrice = last.close - stopMult * last.atr;
 
-  // 依 ADV 分區顯示模式
   if (last.adv >= 60) {
     modeEl.textContent = `高波動擴張模式 (ADV: ${Math.round(last.adv)})`;
     modeEl.className = "text-sm font-bold text-amber-400";
@@ -270,7 +265,7 @@ function renderAdvRiskHub(candles) {
     停損價 <strong class="font-mono text-slate-200">$${stopPrice.toFixed(2)}</strong>
   `;
 
-  // ===== 第 2 層：移動停利分段判斷 =====
+  // 第 2 層：移動停利分段判斷
   const d1adv = last.adv - prev.adv;
   const sdv = last.sdv;
 
@@ -336,7 +331,7 @@ function renderDeltaMatrix(candles) {
 }
 
 /**
- * 6. 渲染歷史交易紀錄表（含資料不足提示）
+ * 6. 渲染歷史交易紀錄表
  */
 function renderHistoryTable(trades, dataLength) {
   const tbody = document.getElementById('historyTableBody');
@@ -377,7 +372,6 @@ function renderHistoryTable(trades, dataLength) {
       ${isProfit ? '+' : ''}${t.pnlPct}%
     </span>`;
 
-    // 顯示軌道與評級
     const trackBadge = t.track ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">軌${t.track}</span>` : '';
     const gradeBadge = t.grade ? `<span class="text-[10px] px-1.5 py-0.5 rounded ${t.grade === 'A' ? 'bg-emerald-900 text-emerald-300' : t.grade === 'B' ? 'bg-sky-900 text-sky-300' : t.grade === 'S' ? 'bg-purple-900 text-purple-300' : 'bg-amber-900 text-amber-300'}">${t.grade}級</span>` : '';
     const addMark = t.addCount > 0 ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-950 text-amber-300">+${t.addCount}</span>` : '';

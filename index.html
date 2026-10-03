@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>台股實時四指標與系統決策矩陣 (v10.7.2 預覽)</title>
+    <title>台股實時四指標與系統決策矩陣 (v10.8)</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen p-4 md:p-8">
@@ -13,12 +13,12 @@
         <!-- Header & 搜尋欄 -->
         <header class="flex flex-col md:flex-row justify-between items-center bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg gap-4">
             <div>
-                <h1 class="text-2xl font-bold text-sky-400">台股實時四指標與系統決策矩陣</h1>
-                <p class="text-sm text-slate-400 mt-1">對數標準化 (T-Score) + 多週期動能 (Δ₁ / Δ₅ / Δ₁₀) + 三軌進場 + 四層出場 + 6個月歷史訊號追蹤</p>
+                <h1 class="text-2xl font-bold text-sky-400">台股實時四指標與系統決策矩陣 <span class="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded">v10.8</span></h1>
+                <p class="text-sm text-slate-400 mt-1">對數標準化 T-Score + Δ動能 + 三軌進場 + 四層出場 + 三次加碼 + 6個月歷史追蹤</p>
             </div>
 
             <div class="flex items-center space-x-2 w-full md:w-auto">
-                <input type="text" id="stockInput" value="8150" placeholder="輸入台股代碼 (如 8150)"
+                <input type="text" id="stockInput" value="8150" placeholder="輸入台股代碼"
                        class="bg-slate-900 border border-slate-600 px-4 py-2 rounded-lg text-white font-mono focus:outline-none focus:border-sky-500 w-full md:w-48">
                 <button onclick="analyzeStock()"
                         class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded-lg font-bold transition text-white whitespace-nowrap">
@@ -84,12 +84,10 @@
             </div>
         </div>
 
-        <!-- ADV 波動度驅動之動態移動風控樞紐區塊 -->
+        <!-- ADV 動態移動風控樞紐 -->
         <div class="bg-slate-800/90 p-6 rounded-xl border border-sky-500/30 shadow-xl space-y-4">
             <div class="flex items-center justify-between border-b border-slate-700 pb-3">
-                <h3 class="text-lg font-bold text-sky-400 flex items-center gap-2">
-                    🛡️ ADV 波動度驅動之動態移動風控樞紐 (Trailing Risk Control)
-                </h3>
+                <h3 class="text-lg font-bold text-sky-400">🛡️ ADV 波動度驅動之動態移動風控樞紐</h3>
                 <span class="text-xs px-2.5 py-1 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/20">適應型移動風控</span>
             </div>
 
@@ -108,11 +106,9 @@
             </div>
         </div>
 
-        <!-- Δ 動能矩陣區塊 -->
+        <!-- Δ 動能矩陣 -->
         <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-            <h3 class="text-lg font-bold text-slate-200 mb-4">
-                多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)
-            </h3>
+            <h3 class="text-lg font-bold text-slate-200 mb-4">多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)</h3>
 
             <div class="overflow-x-auto">
                 <table class="w-full text-center text-sm border-collapse">
@@ -132,13 +128,11 @@
             </div>
         </div>
 
-        <!-- 歷史系統決策訊號紀錄區塊 -->
+        <!-- 歷史系統決策訊號紀錄 -->
         <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg space-y-4">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-700 pb-3 gap-2">
                 <div>
-                    <h3 class="text-lg font-bold text-amber-400 flex items-center gap-2">
-                        📜 歷史系統決策訊號紀錄 (近 6 個月 / 120 交易日)
-                    </h3>
+                    <h3 class="text-lg font-bold text-amber-400">📜 歷史系統決策訊號紀錄 (近 6 個月 / 120 交易日)</h3>
                     <p id="historySummary" class="text-xs text-slate-400 mt-1">等待數據加載中...</p>
                 </div>
                 <span class="text-xs px-2.5 py-1 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">系統歷史檢驗</span>
@@ -169,7 +163,6 @@
 
     </div>
 
-    <!-- 先載入量化計算引擎，再載入 UI 控制器 -->
     <script src="quantEngine.js"></script>
     <script src="main.js"></script>
 </body>
