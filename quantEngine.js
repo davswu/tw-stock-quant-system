@@ -1,42 +1,49 @@
 /**
- * quantEngine.js - 四指標趨勢分析核心引擎 (v10.7.3 修正版)
+ * quantEngine.js - 四指標趨勢分析核心引擎 (v10.7.3 終版)
  * 
- * ========== v10.7.3 修正要點 ==========
- * 1. ✅ ATR 算法改為「簡單移動平均」（與 Python rolling(14).mean() 完全一致）
- * 2. ✅ 加入加碼診斷輸出（可開關）
- * 3. ✅ 加入排除條款診斷輸出（可開關）
- * 4. ✅ 加入進場訊號診斷輸出（可開關）
- * 5. ✅ 修正軌道 2 互斥標記的初始化時機
- * 6. ✅ 確保與 v10.7 Python 引擎逐行對齊
+ * 完整對齊《四指標趨勢分析說明文案 v10.7.2》
  * 
- * ========== 修正原因 ==========
- * 前一版使用「遞迴式 ATR」（Wilder's smoothing），與 Python 的 
- * rolling(14).mean() 不同，導致：
- *   - ADV 數值不同 → ATR 停損倍數分區錯亂
- *   - 停損觸發點與 Python 不一致
- *   - 加碼判斷基準偏移
+ * ========== 核心功能 ==========
+ * 1. 對數 T-Score（SDV / VDV / ADV / BDV），n=30
+ * 2. 多週期動能 Δ₁ / Δ₅ / Δ₁₀
+ * 3. 三軌進場（軌 1 → 軌 3 → 軌 2）
+ * 4. 四層出場（ATR停損 / 移動停利 / 訊號反轉 / 時間停損）
+ * 5. 三次加碼（A/B/C/S 級）
+ * 6. 冷卻期（3/6/12 天，獲利免冷卻）
+ * 7. 排除條款 E1~E4
+ * 8. 高位禁買（最近 5 日 SDV > 75）
  * 
- * 本版改為與 Python 完全一致的簡單移動平均，確保數值對齊。
+ * ========== 修正記錄 ==========
+ * - 修正 high20 / vol5 未計算
+ * - 修正 ATR 為簡單移動平均（對齊 Python rolling(14).mean()）
+ * - 修正 ma20 賦值邏輯
+ * - 加入 DEBUG 診斷模式
  */
 
 const QuantConfig = {
+  // 指標參數
   WINDOW: 30,
   ATR_PERIOD: 14,
   BB_PERIOD: 20,
   COMMISSION: 0.001425,
   TAX: 0.003,
 
+  // 評分門檻
   A_GRADE: 70,
   B_GRADE: 50,
   EXTREME_GRADE: 45,
+
+  // 高位禁買
   HIGH_SDV_FORBID: 75.0,
   HIGH_SDV_LOOKBACK: 5,
 
+  // 初始倉位
   INIT_A_SIZE: 0.70,
   INIT_B_SIZE: 0.50,
 
+  // 加碼門檻與幅度
   ADD1_RET: 5.0,
-  ADD1_SIZE_A: 0.15,
+  ADD1_SIZE_A: 0.10,
   ADD1_SIZE_B: 0.25,
   ADD2_RET: 10.0,
   ADD2_SIZE_A: 0.10,
@@ -44,16 +51,20 @@ const QuantConfig = {
   ADD3_RET: 20.0,
   ADD3_SIZE: 0.10,
 
+  // 出場 / 冷卻
   TIME_STOP_DAYS: 20,
   TIME_STOP_MIN_RET: 8.0,
   COOLDOWN_1: 3,
   COOLDOWN_2: 6,
   COOLDOWN_3: 12,
+  STRONG_WIN_SKIP_COOLDOWN: 3.0,  // 獲利 > +3% 免冷卻
 
+  // 軌道 3（盤整突破）
   SQUEEZE_BDV_MAX: 40,
   SQUEEZE_VOL_RATIO: 1.15,
   SQUEEZE_SIZE: 0.30,
 
+  // 軌道 2（早期試單）
   EARLY_MA20_DIST: 0.015,
   EARLY_SDV_MIN: 48,
   EARLY_SDV_MAX: 58,
@@ -63,7 +74,7 @@ const QuantConfig = {
   EARLY_ADD_CONFIRM: 0.40,
   EARLY_MUTEX_DAYS: 3,
 
-  // 診斷開關
+  // 診斷
   DEBUG: false
 };
 
@@ -83,9 +94,8 @@ class QuantEngine {
     const len = candles.length;
     const result = candles.map(c => ({ ...c }));
 
-    // ---- 1. ATR(14) - 簡單移動平均（與 Python 完全一致）----
+    // ---- 1. ATR(14) - 簡單移動平均 ----
     // Python: tr.rolling(14).mean()
-    // 注意：rolling(14) 需要連續 14 個 TR 值，前 13 天為 null
     const trArr = new Array(len).fill(0);
     for (let i = 0; i < len; i++) {
       if (i === 0) {
@@ -110,6 +120,7 @@ class QuantEngine {
     }
 
     // ---- 2. MA20 + Bandwidth(20,2) ----
+    // Python: bw = (4 * std) / mean
     for (let i = 0; i < len; i++) {
       if (i < cfg.BB_PERIOD - 1) {
         result[i].ma20 = null;
@@ -125,10 +136,11 @@ class QuantEngine {
     }
 
     // ---- 3. 對數 T-Score（SDV / VDV / ADV / BDV）----
-    // Python: 使用 rolling(30) 的 μ_ln、σ_ln
+    // 需要 window = 30 日、ATR 與 BW 都就緒
+    const minIdx = Math.max(cfg.WINDOW + cfg.ATR_PERIOD, cfg.WINDOW + cfg.BB_PERIOD) - 1;
+
     for (let i = 0; i < len; i++) {
-      // 需等 ATR(14) 與 Bandwidth(20) 都就緒
-      if (i < cfg.WINDOW + cfg.BB_PERIOD - 1 || result[i].atr === null) {
+      if (i < minIdx) {
         result[i].sdv = null;
         result[i].vdv = null;
         result[i].adv = null;
@@ -138,8 +150,8 @@ class QuantEngine {
 
       const startIdx = i - cfg.WINDOW + 1;
       const lnP = [], lnV = [], lnA = [], lnB = [];
-
       let valid = true;
+
       for (let k = startIdx; k <= i; k++) {
         if (result[k].atr === null || result[k].bw === null) {
           valid = false;
@@ -259,8 +271,6 @@ class QuantEngine {
           signal: 'BUY', track: 1, type: '突破前高', score: 70,
           grade: 'B', size: cfg.INIT_B_SIZE, price: r.close
         };
-      } else if (cfg.DEBUG) {
-        this._log(`${r.date} 突破前高被排除 (${ex})`);
       }
     }
 
@@ -289,8 +299,6 @@ class QuantEngine {
             size: grade === 'A' ? cfg.INIT_A_SIZE : cfg.INIT_B_SIZE,
             price: r.close
           };
-        } else if (cfg.DEBUG) {
-          this._log(`${r.date} 蓄勢突破被排除 (${ex}, ${s}分)`);
         }
       }
     }
@@ -392,7 +400,7 @@ class QuantEngine {
       };
     }
 
-    // ===== 軌道 2：早期試單（含互斥檢查）=====
+    // ===== 軌道 2：早期試單（含互斥）=====
     if (r.ma20) {
       const dist = Math.abs(r.close - r.ma20) / r.ma20;
       if (dist < cfg.EARLY_MA20_DIST &&
@@ -400,6 +408,7 @@ class QuantEngine {
           r.vdv >= cfg.EARLY_VDV_MIN && r.vdv <= cfg.EARLY_VDV_MAX &&
           r.d1_sdv !== null && r.d1_sdv >= 1 &&
           r.d1_vdv !== null && r.d1_vdv >= 0) {
+        // 互斥檢查
         let hasRecentRegular = false;
         for (let k = Math.max(0, i - cfg.EARLY_MUTEX_DAYS); k < i; k++) {
           if (df[k] && df[k]._regularSignal) {
@@ -430,7 +439,7 @@ class QuantEngine {
     const added2 = position.added2;
     const added3 = position.added3;
 
-    // C 級
+    // C 級：早期試單確認加碼
     if (grade === 'C') {
       if (!added1 && curRet >= 5 && r.sdv >= 60 && r.vdv >= 60) {
         if (cfg.DEBUG) this._log(`${r.date} [加碼] C級 確認 (+${curRet.toFixed(1)}%)`);
@@ -442,7 +451,7 @@ class QuantEngine {
       return null;
     }
 
-    // S 級
+    // S 級：盤整突破確認加碼
     if (grade === 'S') {
       if (!added1 && curRet >= 4 && r.sdv >= 60 && r.vdv >= 60) {
         if (cfg.DEBUG) this._log(`${r.date} [加碼] S級 確認 (+${curRet.toFixed(1)}%)`);
@@ -454,7 +463,7 @@ class QuantEngine {
       return null;
     }
 
-    // A/B 級三次加碼
+    // A/B 級：三次加碼
     const size1 = grade === 'A' ? cfg.ADD1_SIZE_A : cfg.ADD1_SIZE_B;
     const size2 = grade === 'A' ? cfg.ADD2_SIZE_A : cfg.ADD2_SIZE_B;
 
@@ -503,7 +512,7 @@ class QuantEngine {
       };
     }
 
-    // 第 2 層：移動停利（依當前收益）
+    // 第 2 層：移動停利（依當前收益，非峰值）
     let trailLevel = null;
     if (curRet >= 20) trailLevel = highest - 3.5 * r.atr;
     else if (curRet >= 15) trailLevel = avgPrice * 1.08;
@@ -559,14 +568,10 @@ class QuantEngine {
       df[i]._regularSignal = false;
       if (i >= 10 && df[i].sdv !== null) {
         const r = df[i];
-        // 軌 1 五大訊號的簡化標記（只要基本條件成立即算）
-        // 1. 突破前高
         const cond1 = r.high20 !== null && r.close >= r.high20 &&
                       r.vdv >= 60 && r.sdv >= 50 && r.sdv <= 65;
-        // 2. 蓄勢突破（基本條件）
         const cond2 = r.adv >= 35 && r.adv <= 65 && r.bdv < 55 &&
                       r.sdv >= 45 && r.sdv <= 68 && r.vdv >= 50;
-        // 3. 順勢拉回（基本條件）
         const cond3 = r.adv >= 35 && r.adv <= 65 && r.bdv >= 40 && r.bdv <= 70 &&
                       r.sdv >= 45 && r.sdv <= 65 && r.vdv < 50;
 
@@ -613,8 +618,11 @@ class QuantEngine {
             addCount: (position.added1 ? 1 : 0) + (position.added2 ? 1 : 0) + (position.added3 ? 1 : 0)
           });
 
-          // 冷卻期
-          if (retPct > 0) {
+          // 冷卻期（獲利 > +3% 免冷卻）
+          if (retPct > cfg.STRONG_WIN_SKIP_COOLDOWN) {
+            lossStreak = 0;
+            cooldownUntil = i + 1;
+          } else if (retPct > 0) {
             lossStreak = 0;
             cooldownUntil = i + 1;
           } else {

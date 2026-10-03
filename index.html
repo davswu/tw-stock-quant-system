@@ -3,25 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>台股實時四指標與歷史系統決策矩陣 (v10.7.2)</title>
-    <!-- Tailwind CSS CDN -->
+    <title>台股實時四指標與系統決策矩陣 (v10.7.2 預覽)</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen p-4 md:p-8">
 
     <div class="max-w-7xl mx-auto space-y-6">
-        
+
         <!-- Header & 搜尋欄 -->
         <header class="flex flex-col md:flex-row justify-between items-center bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg gap-4">
             <div>
                 <h1 class="text-2xl font-bold text-sky-400">台股實時四指標與系統決策矩陣</h1>
                 <p class="text-sm text-slate-400 mt-1">對數標準化 (T-Score) + 多週期動能 (Δ₁ / Δ₅ / Δ₁₀) + 三軌進場 + 四層出場 + 6個月歷史訊號追蹤</p>
             </div>
-            
+
             <div class="flex items-center space-x-2 w-full md:w-auto">
-                <input type="text" id="stockInput" value="2330" placeholder="輸入台股代碼 (如 2330)" 
+                <input type="text" id="stockInput" value="8150" placeholder="輸入台股代碼 (如 8150)"
                        class="bg-slate-900 border border-slate-600 px-4 py-2 rounded-lg text-white font-mono focus:outline-none focus:border-sky-500 w-full md:w-48">
-                <button onclick="analyzeStock()" 
+                <button onclick="analyzeStock()"
                         class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded-lg font-bold transition text-white whitespace-nowrap">
                     實時分析
                 </button>
@@ -65,7 +64,7 @@
                 <div id="sdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
                 <div id="sdvStatus" class="text-xs mt-2 text-slate-400">--</div>
             </div>
-            
+
             <div class="bg-slate-800 p-5 rounded-xl border border-slate-700">
                 <div class="text-sm font-bold text-slate-400 mb-1">資金強度 (VDV)</div>
                 <div id="vdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
@@ -104,7 +103,7 @@
                 <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-700/80">
                     <div class="text-xs text-slate-400 mb-1">移動停利監控 (Trailing Take-Profit)</div>
                     <div id="advTakeProfitAlert" class="text-sm font-semibold text-emerald-400">常態監控中</div>
-                    <div class="text-xs text-slate-400 mt-2">觸發層級：+5%（保本）→ +10%（鎖3%）→ +15%（鎖8%）→ +20%（過熱高潮）</div>
+                    <div class="text-xs text-slate-400 mt-2">移動停利分段：+5%（保本）→ +10%（鎖3%）→ +15%（鎖8%）→ +20%（過熱高潮）</div>
                 </div>
             </div>
         </div>
@@ -114,7 +113,7 @@
             <h3 class="text-lg font-bold text-slate-200 mb-4">
                 多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)
             </h3>
-            
+
             <div class="overflow-x-auto">
                 <table class="w-full text-center text-sm border-collapse">
                     <thead>

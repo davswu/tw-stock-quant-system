@@ -1,67 +1,82 @@
 /**
- * main.js - 四指標趨勢分析 UI 控制器 (v10.7.2)
- * 適配 index.html 主架構
- * GAS API URL 已更新
+ * main.js - 四指標趨勢分析 UI 控制器 (v10.7.2 對齊版)
+ * 
+ * 完整對齊《四指標趨勢分析說明文案 v10.7.2》與 quantEngine.js v10.7.3
+ * 
+ * GAS API URL: 已更新為最新部署版本
  */
 
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx5h2Ncq111yq3k6tFffiOS9m0vOBtVywbsVdfZPCHvNbSv0vIGYiC_MimgkZGV3gbP/exec";
 
-// 初始化引擎
+// 初始化量化引擎（如需診斷，改為 { ...QuantConfig, DEBUG: true }）
 const engine = new QuantEngine();
 
 document.addEventListener('DOMContentLoaded', () => {
   analyzeStock();
 });
 
+/**
+ * 主分析進入點
+ */
 async function analyzeStock() {
   const elStockInput = document.getElementById('stockInput');
   const elDesc = document.getElementById('decisionDesc');
   const stockCode = elStockInput ? elStockInput.value.trim() || '2330' : '2330';
 
   if (elDesc) {
-    elDesc.textContent = `⏳ 連線 GAS API 抓取 [${stockCode}] 數據中...`;
+    elDesc.textContent = `⏳ 正連線 GAS API 抓取 [${stockCode}] 行情數據中...`;
     elDesc.className = 'text-sm text-amber-400 font-medium animate-pulse mt-3 leading-relaxed';
   }
 
   try {
-    const res = await fetch(`${GAS_API_URL}?stock=${encodeURIComponent(stockCode)}`, {
-      method: 'GET', redirect: 'follow'
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const raw = await res.json();
-    if (raw.status === 'error') throw new Error(raw.message || 'GAS 後端錯誤');
+    const requestUrl = `${GAS_API_URL}?stock=${encodeURIComponent(stockCode)}`;
+    const response = await fetch(requestUrl, { method: 'GET', redirect: 'follow' });
 
-    const stockName = raw.stockName || stockCode;
-    const rawCandles = raw.data || raw.candles || raw;
+    if (!response.ok) throw new Error(`HTTP 錯誤碼: ${response.status}`);
+
+    const rawResult = await response.json();
+    if (rawResult.status === 'error') throw new Error(rawResult.message || 'GAS 後端執行失敗');
+
+    const stockName = rawResult.stockName || stockCode;
+    const rawCandles = rawResult.data || rawResult.candles || rawResult;
+
     if (!Array.isArray(rawCandles) || rawCandles.length === 0) {
-      throw new Error(`查無 [${stockCode}] 有效數據`);
+      throw new Error(`查無股票代碼 [${stockCode}] 之有效 K 線數據`);
     }
 
-    // 清洗數據
+    // 1. 資料清洗
     const candles = normalizeCandleData(rawCandles);
 
-    // 計算指標 + 回測
-    const processed = engine.calculateIndicators(candles);
-    const backtest = engine.runFullCompoundBacktest(candles, 100000);
+    if (candles.length < 48) {
+      throw new Error(`數據長度僅 ${candles.length} 天，不足 48 天指標暖機門檻`);
+    }
 
-    // 渲染各區塊
-    renderHeader(processed, stockCode, stockName);
-    renderSignalBadge(processed);
-    renderTScoreCards(processed);
-    renderAdvRiskHub(processed);
-    renderDeltaMatrix(processed);
-    renderHistoryTable(backtest.tradeHistory);
+    // 2. 計算指標
+    const processedCandles = engine.calculateIndicators(candles);
 
-  } catch (err) {
-    console.error('Analysis Error:', err);
+    // 3. 執行完整回測
+    const backtestResult = engine.runFullCompoundBacktest(candles, 100000, processedCandles);
+
+    // 4. 渲染各區塊
+    renderHeaderAndStockInfo(stockCode, stockName, processedCandles);
+    renderSignalBadge(processedCandles);
+    renderTScoreCards(processedCandles);
+    renderAdvRiskHub(processedCandles);
+    renderDeltaMatrix(processedCandles);
+    renderHistoryTable(backtestResult.tradeHistory, processedCandles.length);
+
+  } catch (error) {
+    console.error('API Fetch/Analysis Error:', error);
     if (elDesc) {
-      elDesc.textContent = `❌ 失敗：${err.message}`;
+      elDesc.textContent = `❌ 連線/處理失敗：${error.message}`;
       elDesc.className = 'text-sm text-rose-400 font-semibold mt-3 leading-relaxed';
     }
   }
 }
 
-// ============ 數據清洗 ============
+/**
+ * 資料清洗與轉換
+ */
 function normalizeCandleData(data) {
   return data.map(item => ({
     date: item.date || item.Date || item.time || '',
@@ -73,104 +88,149 @@ function normalizeCandleData(data) {
   })).filter(c => c.close > 0 && c.date !== '');
 }
 
-// ============ 1. 頁首股票資訊 ============
-function renderHeader(candles, code, name) {
+/**
+ * 1. 渲染股票名稱、股價與成交量
+ */
+function renderHeaderAndStockInfo(code, name, candles) {
   const last = candles[candles.length - 1];
   const prev = candles[candles.length - 2] || last;
-  const diff = last.close - prev.close;
-  const pct = ((diff / prev.close) * 100).toFixed(2);
-  const isUp = diff >= 0;
+
+  const priceDiff = last.close - prev.close;
+  const pricePct = ((priceDiff / prev.close) * 100).toFixed(2);
+  const isUp = priceDiff >= 0;
 
   const elTitle = document.getElementById('stockTitle');
   if (elTitle) {
     elTitle.innerHTML = `
       <span class="text-2xl font-extrabold text-white">${code} ${name}</span>
-      <span class="text-sm text-slate-300 font-normal mt-1">最新數據：${last.date}</span>
+      <span class="text-sm text-slate-300 font-normal mt-1">最新數據日期：${last.date}</span>
     `;
   }
 
   const elPrice = document.getElementById('stockPrice');
   if (elPrice) {
     elPrice.className = `text-2xl md:text-3xl font-extrabold font-mono ${isUp ? 'text-rose-400' : 'text-emerald-400'}`;
-    elPrice.textContent = `NT$ ${last.close.toFixed(2)} (${isUp ? '+' : ''}${pct}%)`;
+    elPrice.textContent = `NT$ ${last.close.toFixed(2)} (${isUp ? '+' : ''}${pricePct}%)`;
   }
 
   const elVolume = document.getElementById('stockVolume');
   if (elVolume) {
-    elVolume.textContent = `${Math.round(last.volume / 1000).toLocaleString()} 張`;
+    const volInLots = Math.round(last.volume / 1000);
+    elVolume.textContent = `${volInLots.toLocaleString()} 張`;
   }
 }
 
-// ============ 2. 決策訊號徽章 ============
+/**
+ * 2. 渲染當前系統決策訊號（完全對齊 v10.7.2 文案）
+ */
 function renderSignalBadge(candles) {
-  const last = candles[candles.length - 1];
   const idx = candles.length - 1;
-  const decision = engine.evaluateEntrySignal(candles, idx);
-
+  const last = candles[idx];
   const elBadge = document.getElementById('signalBadge');
   const elDesc = document.getElementById('decisionDesc');
 
-  if (elBadge) {
-    if (decision.signal === 'BUY') {
-      const gradeColors = {
-        'A': 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
-        'B': 'bg-sky-500/20 text-sky-400 border-sky-500/40',
-        'S': 'bg-purple-500/20 text-purple-400 border-purple-500/40',
-        'C': 'bg-amber-500/20 text-amber-400 border-amber-500/40'
-      };
-      const cls = gradeColors[decision.grade] || 'bg-sky-500/20 text-sky-400 border-sky-500/40';
-      elBadge.className = `inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm ${cls} border text-center`;
-      elBadge.textContent = `🚀 ${decision.grade}級 ${decision.type} (${decision.score}分)`;
-    } else {
-      elBadge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-slate-700 text-slate-300 text-center";
-      elBadge.textContent = "💤 觀望待變";
-    }
+  if (!elBadge || !elDesc) return;
+
+  // 指標暖機檢查
+  if (last.sdv === null || last.sdv === undefined) {
+    elBadge.className = "inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-slate-700 text-slate-300 text-center";
+    elBadge.textContent = "⏳ 指標暖機中";
+    elDesc.className = "text-sm text-slate-400 mt-3 leading-relaxed";
+    elDesc.textContent = `需至少 48 個交易日方能計算 T-Score，目前累積 ${candles.length} 天。`;
+    return;
   }
 
-  if (elDesc) {
+  // 呼叫引擎取得決策
+  const decision = engine.evaluateEntrySignal(candles, idx);
+
+  // ===== 訊號觸發 =====
+  if (decision.signal === 'BUY') {
+    const gradeStyles = {
+      'A': { bg: 'bg-emerald-500/20', text: 'text-emerald-400', border: 'border-emerald-500/40', icon: '🚀', label: '強勢主攻' },
+      'B': { bg: 'bg-sky-500/20', text: 'text-sky-400', border: 'border-sky-500/40', icon: '📈', label: '標準進場' },
+      'S': { bg: 'bg-purple-500/20', text: 'text-purple-400', border: 'border-purple-500/40', icon: '⚡', label: '盤整突破' },
+      'C': { bg: 'bg-amber-500/20', text: 'text-amber-400', border: 'border-amber-500/40', icon: '🎯', label: '早期試單' }
+    };
+    const style = gradeStyles[decision.grade] || gradeStyles['B'];
+    const sizePct = Math.round(decision.size * 100);
+
+    elBadge.className = `inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm ${style.bg} ${style.text} ${style.border} border text-center`;
+    elBadge.textContent = `${style.icon} ${decision.grade}級 ${decision.type} (${decision.score}分)`;
+
     elDesc.className = "text-sm text-slate-300 mt-3 leading-relaxed";
-    if (decision.signal === 'BUY') {
-      const sizePct = Math.round(decision.size * 100);
-      elDesc.textContent = `當前觸發 ${decision.track} 軌 ${decision.type}，建議倉位 ${sizePct}%。`;
-    } else {
-      elDesc.textContent = `目前無符合之進場訊號，系統持續監控中。`;
-    }
+    elDesc.innerHTML = `
+      <span class="inline-block px-2 py-0.5 rounded bg-slate-700 text-slate-300 text-xs font-bold">軌道 ${decision.track}</span>
+      <span class="ml-1">${style.label}</span> · 
+      建議倉位 <strong class="${style.text}">${sizePct}%</strong> · 
+      進場價 <strong class="font-mono">$${decision.price.toFixed(2)}</strong>
+    `;
+    return;
   }
+
+  // ===== 無訊號：顯示位階狀態 =====
+  const sdv = last.sdv;
+  let state = { name: '中性觀望', color: 'text-slate-300', bg: 'bg-slate-700', icon: '💤' };
+
+  if (sdv >= 70) state = { name: '高位警戒', color: 'text-amber-400', bg: 'bg-amber-500/20', icon: '⚠️' };
+  else if (sdv >= 60) state = { name: '多頭強勢', color: 'text-rose-400', bg: 'bg-rose-500/20', icon: '🔥' };
+  else if (sdv >= 50) state = { name: '中性偏多', color: 'text-sky-400', bg: 'bg-sky-500/20', icon: '💤' };
+  else if (sdv >= 40) state = { name: '中性偏空', color: 'text-sky-300', bg: 'bg-sky-500/10', icon: '💤' };
+  else if (sdv >= 30) state = { name: '空頭強勢', color: 'text-emerald-400', bg: 'bg-emerald-500/20', icon: '📉' };
+  else state = { name: '低位警戒', color: 'text-emerald-300', bg: 'bg-emerald-500/30', icon: '🟢' };
+
+  elBadge.className = `inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm ${state.bg} ${state.color} border border-slate-600 text-center`;
+  elBadge.textContent = `${state.icon} ${state.name} · 無訊號`;
+
+  elDesc.className = "text-sm text-slate-400 mt-3 leading-relaxed";
+  elDesc.textContent = `當前 SDV ${Math.round(sdv)}，系統持續監控三軌訊號中。`;
 }
 
-// ============ 3. 四指標 T-Score 卡片 ============
+/**
+ * 3. 渲染 4 大指標 T-Score 卡片
+ */
 function renderTScoreCards(candles) {
   const last = candles[candles.length - 1];
 
-  const update = (id, statusId, val, high, low) => {
-    const el = document.getElementById(id);
-    const st = document.getElementById(statusId);
-    if (!el || !st) return;
-    const v = Math.round(val);
-    el.textContent = v;
+  const updateCard = (valId, statusId, value, highLimit, lowLimit) => {
+    const elVal = document.getElementById(valId);
+    const elStatus = document.getElementById(statusId);
+    if (!elVal || !elStatus) return;
 
-    if (v >= high) {
-      el.className = "text-4xl font-extrabold font-mono text-amber-400";
-      st.textContent = "高位強勢 / 過熱警戒";
-      st.className = "text-xs mt-2 text-amber-400 font-semibold";
-    } else if (v <= low) {
-      el.className = "text-4xl font-extrabold font-mono text-slate-500";
-      st.textContent = "低位沉悶 / 無顯著動能";
-      st.className = "text-xs mt-2 text-slate-400";
+    if (value === null || value === undefined) {
+      elVal.textContent = '--';
+      elVal.className = "text-4xl font-extrabold font-mono text-slate-500";
+      elStatus.textContent = "指標暖機中";
+      elStatus.className = "text-xs mt-2 text-slate-400";
+      return;
+    }
+
+    const roundVal = Math.round(value);
+    elVal.textContent = roundVal;
+
+    if (roundVal >= highLimit) {
+      elVal.className = "text-4xl font-extrabold font-mono text-amber-400";
+      elStatus.textContent = "高位強勢 / 過熱警戒";
+      elStatus.className = "text-xs mt-2 text-amber-400 font-semibold";
+    } else if (roundVal <= lowLimit) {
+      elVal.className = "text-4xl font-extrabold font-mono text-slate-500";
+      elStatus.textContent = "低位沉悶 / 無顯著動能";
+      elStatus.className = "text-xs mt-2 text-slate-400";
     } else {
-      el.className = "text-4xl font-extrabold font-mono text-white";
-      st.textContent = "常態區間運作";
-      st.className = "text-xs mt-2 text-slate-400";
+      elVal.className = "text-4xl font-extrabold font-mono text-white";
+      elStatus.textContent = "常態區間運作";
+      elStatus.className = "text-xs mt-2 text-slate-400";
     }
   };
 
-  update('sdvValue', 'sdvStatus', last.sdv, 65, 35);
-  update('vdvValue', 'vdvStatus', last.vdv, 60, 30);
-  update('advValue', 'advStatus', last.adv, 60, 30);
-  update('bdvValue', 'bdvStatus', last.bdv, 65, 35);
+  updateCard('sdvValue', 'sdvStatus', last.sdv, 65, 35);
+  updateCard('vdvValue', 'vdvStatus', last.vdv, 60, 30);
+  updateCard('advValue', 'advStatus', last.adv, 60, 30);
+  updateCard('bdvValue', 'bdvStatus', last.bdv, 65, 35);
 }
 
-// ============ 4. ADV 動態風控樞紐 ============
+/**
+ * 4. 渲染 ADV 動態移動風控樞紐（對齊 v10.7.2 四層出場）
+ */
 function renderAdvRiskHub(candles) {
   const last = candles[candles.length - 1];
   const prev = candles[candles.length - 2] || last;
@@ -179,33 +239,59 @@ function renderAdvRiskHub(candles) {
   const ruleEl = document.getElementById('advStopLossRule');
   const alertEl = document.getElementById('advTakeProfitAlert');
 
-  const atrStop = (last.close - last.atr * 2.5).toFixed(2);
+  if (!modeEl || !ruleEl || !alertEl) return;
 
-  if (modeEl && ruleEl) {
-    if (last.adv >= 60) {
-      modeEl.textContent = `高波動擴張模式 (ADV: ${Math.round(last.adv)})`;
-      modeEl.className = "text-sm font-bold text-amber-400";
-      ruleEl.textContent = `當前放大通道防護。動態停利參考價約 NT$ ${atrStop} (2.5x ATR)`;
-    } else {
-      modeEl.textContent = `標準收斂風控模式 (ADV: ${Math.round(last.adv)})`;
-      modeEl.className = "text-sm font-bold text-sky-400";
-      ruleEl.textContent = `遵循標準 ATR 動態停損與移動停利軌道。`;
-    }
+  if (last.adv === null || last.atr === null) {
+    modeEl.textContent = '--';
+    ruleEl.textContent = '--';
+    alertEl.textContent = '指標暖機中';
+    return;
   }
 
-  if (alertEl) {
-    const d1adv = last.adv - prev.adv;
-    if (last.sdv >= 65 && last.adv >= 70 && d1adv <= -3.0) {
-      alertEl.textContent = "🚨 觸發情緒爆發拐點！建議移動停利落袋";
-      alertEl.className = "text-sm font-bold text-rose-400 animate-pulse";
-    } else {
-      alertEl.textContent = "常態監控中";
-      alertEl.className = "text-sm font-semibold text-emerald-400";
-    }
+  // ===== 第 1 層：ATR 動態停損（依 ADV 動態倍數）=====
+  let stopMult = last.adv < 40 ? 2.0 : last.adv < 60 ? 2.5 : 3.0;
+  const stopPrice = last.close - stopMult * last.atr;
+
+  // 依 ADV 分區顯示模式
+  if (last.adv >= 60) {
+    modeEl.textContent = `高波動擴張模式 (ADV: ${Math.round(last.adv)})`;
+    modeEl.className = "text-sm font-bold text-amber-400";
+  } else if (last.adv >= 40) {
+    modeEl.textContent = `標準順勢模式 (ADV: ${Math.round(last.adv)})`;
+    modeEl.className = "text-sm font-bold text-sky-400";
+  } else {
+    modeEl.textContent = `低波動收斂模式 (ADV: ${Math.round(last.adv)})`;
+    modeEl.className = "text-sm font-bold text-emerald-400";
+  }
+
+  ruleEl.innerHTML = `
+    <span class="text-slate-400">ATR 停損倍數：</span>
+    <strong class="text-amber-300">${stopMult}× ATR</strong> · 
+    停損價 <strong class="font-mono text-slate-200">$${stopPrice.toFixed(2)}</strong>
+  `;
+
+  // ===== 第 2 層：移動停利分段判斷 =====
+  const d1adv = last.adv - prev.adv;
+  const sdv = last.sdv;
+
+  if (sdv >= 70 && last.adv >= 60) {
+    alertEl.textContent = "🚨 過熱高潮警戒：SDV ≥ 70 且 ADV ≥ 60";
+    alertEl.className = "text-sm font-bold text-rose-400 animate-pulse";
+  } else if (sdv >= 65 && last.adv >= 60 && d1adv <= -3.0) {
+    alertEl.textContent = "⚡ 情緒爆發拐點：建議移動停利落袋";
+    alertEl.className = "text-sm font-bold text-amber-400 animate-pulse";
+  } else if (sdv >= 60 && last.adv >= 40) {
+    alertEl.textContent = "📊 移動停利監控：分段鎖利 (3% → 8% → 波段最高 -3.5 ATR)";
+    alertEl.className = "text-sm font-semibold text-sky-400";
+  } else {
+    alertEl.textContent = "常態監控中";
+    alertEl.className = "text-sm font-semibold text-emerald-400";
   }
 }
 
-// ============ 5. Δ 動能矩陣 ============
+/**
+ * 5. 渲染多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)
+ */
 function renderDeltaMatrix(candles) {
   const tbody = document.getElementById('deltaMatrixBody');
   if (!tbody) return;
@@ -216,76 +302,101 @@ function renderDeltaMatrix(candles) {
   const c5 = candles[len - 6] || last;
   const c10 = candles[len - 11] || last;
 
-  const list = [
-    { label: '價格位階 (SDV)', key: 'sdv' },
-    { label: '資金強度 (VDV)', key: 'vdv' },
-    { label: '風險環境 (ADV)', key: 'adv' },
-    { label: '週期張力 (BDV)', key: 'bdv' }
+  const indicators = [
+    { name: '價格位階 (SDV)', key: 'sdv' },
+    { name: '資金強度 (VDV)', key: 'vdv' },
+    { name: '風險環境 (ADV)', key: 'adv' },
+    { name: '週期張力 (BDV)', key: 'bdv' }
   ];
 
-  const fmt = (v) => {
-    const r = v.toFixed(1);
-    if (v > 0) return `<span class="text-rose-400 font-bold">+${r}</span>`;
-    if (v < 0) return `<span class="text-emerald-400 font-bold">${r}</span>`;
-    return `<span class="text-slate-400">${r}</span>`;
+  const formatDelta = (val) => {
+    if (val === null || val === undefined) return `<span class="text-slate-500">--</span>`;
+    const round = val.toFixed(1);
+    if (val > 0) return `<span class="text-rose-400 font-bold">+${round}</span>`;
+    if (val < 0) return `<span class="text-emerald-400 font-bold">${round}</span>`;
+    return `<span class="text-slate-400">${round}</span>`;
   };
 
-  tbody.innerHTML = list.map(item => {
-    const cur = last[item.key];
-    const d1 = cur - c1[item.key];
-    const d5 = cur - c5[item.key];
-    const d10 = cur - c10[item.key];
+  tbody.innerHTML = indicators.map(ind => {
+    const current = last[ind.key];
+    const d1 = (current !== null && c1[ind.key] !== null) ? current - c1[ind.key] : null;
+    const d5 = (current !== null && c5[ind.key] !== null) ? current - c5[ind.key] : null;
+    const d10 = (current !== null && c10[ind.key] !== null) ? current - c10[ind.key] : null;
 
     return `
       <tr class="hover:bg-slate-800/50 transition border-b border-slate-700/30">
-        <td class="p-3 text-left font-sans text-slate-200">${item.label}</td>
-        <td class="p-3 text-white font-bold">${Math.round(cur)}</td>
-        <td class="p-3">${fmt(d1)}</td>
-        <td class="p-3">${fmt(d5)}</td>
-        <td class="p-3">${fmt(d10)}</td>
+        <td class="p-3 text-left font-sans text-slate-200">${ind.name}</td>
+        <td class="p-3 text-white font-bold">${current !== null ? Math.round(current) : '--'}</td>
+        <td class="p-3">${formatDelta(d1)}</td>
+        <td class="p-3">${formatDelta(d5)}</td>
+        <td class="p-3">${formatDelta(d10)}</td>
       </tr>
     `;
   }).join('');
 }
 
-// ============ 6. 歷史交易紀錄 ============
-function renderHistoryTable(trades) {
+/**
+ * 6. 渲染歷史交易紀錄表（含資料不足提示）
+ */
+function renderHistoryTable(trades, dataLength) {
   const tbody = document.getElementById('historyTableBody');
-  const summary = document.getElementById('historySummary');
+  const summaryEl = document.getElementById('historySummary');
   if (!tbody) return;
 
   tbody.innerHTML = '';
 
-  if (!trades || trades.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-slate-500 text-center font-sans">近 120 交易日內無符合之進場訊號</td></tr>`;
-    if (summary) summary.textContent = '近 120 交易日無觸發紀錄';
+  // 資料不足判斷（暖機 48 + Δ₁₀ 10 = 58 天）
+  if (dataLength < 58) {
+    tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-amber-400 text-center font-sans">
+      ⚠️ 數據不足（目前 ${dataLength} 天，至少需 58 天方能計算指標與回測）
+    </td></tr>`;
+    if (summaryEl) summaryEl.textContent = `數據長度 ${dataLength} 天，不足以產生交易訊號`;
     return;
   }
 
-  if (summary) {
+  if (!trades || trades.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-slate-500 text-center font-sans">
+      近 6 個月內無符合之進場訊號（指標暖機完成後仍未觸發）
+    </td></tr>`;
+    if (summaryEl) summaryEl.textContent = `數據 ${dataLength} 天，無觸發紀錄`;
+    return;
+  }
+
+  if (summaryEl) {
     const wins = trades.filter(t => t.pnlPct > 0).length;
-    const rate = Math.round((wins / trades.length) * 100);
-    summary.textContent = `共觸發 ${trades.length} 筆交易 | 勝率 ${rate}% (${wins}勝 / ${trades.length - wins}敗)`;
+    const winRate = Math.round((wins / trades.length) * 100);
+    summaryEl.textContent = `共觸發 ${trades.length} 筆交易 | 勝率 ${winRate}% (${wins}勝 / ${trades.length - wins}敗)`;
   }
 
   trades.forEach(t => {
     const row = document.createElement('tr');
     row.className = 'border-b border-slate-700/40 hover:bg-slate-800/60 transition';
 
-    const isWin = t.pnlPct > 0;
-    const badge = `<span class="text-xs px-2 py-0.5 rounded ${isWin ? 'bg-emerald-950 text-emerald-400 border border-emerald-700/50' : 'bg-rose-950 text-rose-400 border border-rose-700/50'}">
-      ${isWin ? '+' : ''}${t.pnlPct}%
+    const isProfit = t.pnlPct > 0;
+    const pnlBadge = `<span class="text-xs px-2 py-0.5 rounded ${isProfit ? 'bg-emerald-950 text-emerald-400 border border-emerald-700/50' : 'bg-rose-950 text-rose-400 border border-rose-700/50'}">
+      ${isProfit ? '+' : ''}${t.pnlPct}%
     </span>`;
+
+    // 顯示軌道與評級
+    const trackBadge = t.track ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">軌${t.track}</span>` : '';
+    const gradeBadge = t.grade ? `<span class="text-[10px] px-1.5 py-0.5 rounded ${t.grade === 'A' ? 'bg-emerald-900 text-emerald-300' : t.grade === 'B' ? 'bg-sky-900 text-sky-300' : t.grade === 'S' ? 'bg-purple-900 text-purple-300' : 'bg-amber-900 text-amber-300'}">${t.grade}級</span>` : '';
+    const addMark = t.addCount > 0 ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-950 text-amber-300">+${t.addCount}</span>` : '';
 
     row.innerHTML = `
       <td class="p-3 text-slate-300">${t.buyDate}</td>
       <td class="p-3 text-slate-200">NT$ ${t.buyPrice.toFixed(2)}</td>
-      <td class="p-3 text-sky-400 font-medium border-r border-slate-700/60">${t.buySignal}</td>
+      <td class="p-3 text-sky-400 font-medium border-r border-slate-700/60">
+        <div class="flex items-center justify-center gap-1 flex-wrap">
+          ${trackBadge}${gradeBadge}
+          <span class="text-xs">${t.buySignal}</span>
+          ${addMark}
+        </div>
+      </td>
       <td class="p-3 text-slate-300">${t.sellDate}</td>
       <td class="p-3 text-slate-200">NT$ ${t.sellPrice.toFixed(2)}</td>
       <td class="p-3">
         <div class="flex items-center justify-center gap-2">
-          ${badge}
+          ${pnlBadge}
           <span class="text-xs text-slate-400">${t.sellReason}</span>
         </div>
       </td>
