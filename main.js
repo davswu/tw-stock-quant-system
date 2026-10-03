@@ -2,64 +2,37 @@
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx5h2Ncq111yq3k6tFffiOS9m0vOBtVywbsVdfZPCHvNbSv0vIGYiC_MimgkZGV3gbP/exec";
 
 // ============================================================
-// 安全 DOM 操作工具函式（防止因 missing ID 導致腳本中斷）
-// ============================================================
-function setText(id, text) {
-    const el = document.getElementById(id);
-    if (el) el.innerText = text;
-}
-
-function setHTML(id, html) {
-    const el = document.getElementById(id);
-    if (el) el.innerHTML = html;
-}
-
-// ============================================================
 // 主流程：抓取資料 → 引擎分析 → 渲染 UI
 // ============================================================
 async function analyzeStock() {
     const codeInput = document.getElementById("stockInput");
-    const code = codeInput ? codeInput.value.trim().toUpperCase() : "2330";
+    const code = codeInput ? codeInput.value.trim() : "2330";
     if (!code) return;
 
-    setText("decisionDesc", `正在抓取 ${code} 即時行情資料...`);
+    document.getElementById("decisionDesc").innerText = `正在抓取 ${code} 即時行情資料...`;
 
     try {
         const res = await fetch(`${GAS_API_URL}?code=${encodeURIComponent(code)}`);
         const rawData = await res.json();
-const rawData = await res.json();
-
-// ===== 暫時的診斷日誌 =====
-console.log("=== API 原始回應 ===");
-console.log("status:", rawData.status);
-console.log("name:", rawData.name);
-console.log("data 是否為陣列:", Array.isArray(rawData.data));
-console.log("資料筆數:", rawData.data ? rawData.data.length : 'N/A');
-console.log("第一筆原始資料:", JSON.stringify(rawData.data ? rawData.data[0] : null));
-console.log("第一筆的鍵:", rawData.data && rawData.data[0] ? Object.keys(rawData.data[0]) : 'N/A');
-console.log("最後一筆原始資料:", JSON.stringify(rawData.data && rawData.data.length > 0 ? rawData.data[rawData.data.length - 1] : null));
-// ===== 診斷結束 =====
 
         if (!rawData || rawData.status === "error" || !rawData.data || rawData.data.length === 0) {
-            setText("decisionDesc", rawData.message || `無法取得 ${code} 行情，請確認股票代碼。`);
+            document.getElementById("decisionDesc").innerText = rawData.message || `無法取得 ${code} 行情，請確認股票代碼。`;
             return;
         }
 
         const engine = new QuantDecisionEngine(rawData.data);
         const result = engine.getLatestAnalysis();
+        const history = engine.getHistoricalDecisionSignals(120);
 
-        // 防禦：若資料不足 49 筆，getLatestAnalysis 會傳回 null
         if (!result) {
-            setText("decisionDesc", `歷史資料筆數不足（需至少 49 交易日），無法計算對數 T-Score。`);
+            document.getElementById("decisionDesc").innerText = "歷史資料筆數不足，無法計算對數 T-Score。";
             return;
         }
 
-        // 確定有分析結果後再計算歷史交易訊號
-        const history = engine.getHistoricalDecisionSignals(120);
         updateUI(result, history, rawData.isBefore9AM, rawData.name, code);
     } catch (err) {
-        console.error("API 連線或分析失敗:", err);
-        setText("decisionDesc", `無法取得數據：${err.message}`);
+        console.error("API 連線失敗:", err);
+        document.getElementById("decisionDesc").innerText = `無法取得數據：${err.message}`;
     }
 }
 
@@ -70,24 +43,24 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
     const { current, delta, decision, advRiskControl } = res;
 
     // 股票名稱
-    setHTML("stockTitle", `
+    document.getElementById("stockTitle").innerHTML = `
         <span class="text-2xl font-extrabold text-white">${code}</span>
         <span class="text-sm text-sky-300 font-semibold mt-1">${stockName || '（未取得名稱）'}</span>
-    `);
+    `;
 
     // 價格 / 成交量
     const close = Number(current.close);
     const volume = Number(current.volume);
-    setText("priceLabel", isBefore9AM ? "昨日 (T-1) 收盤價" : "當日 (T) 即時股價");
-    setText("volumeLabel", isBefore9AM ? "昨日 (T-1) 成交量" : "當日 (T) 即時成交量");
-    setText("stockPrice", `NT$ ${Number.isFinite(close) ? close.toFixed(2) : '--'}`);
-    setText("stockVolume", Number.isFinite(volume) ? `${volume.toLocaleString()} 張` : '-- 張');
+    document.getElementById("priceLabel").innerText = isBefore9AM ? "昨日 (T-1) 收盤價" : "當日 (T) 即時股價";
+    document.getElementById("volumeLabel").innerText = isBefore9AM ? "昨日 (T-1) 成交量" : "當日 (T) 即時成交量";
+    document.getElementById("stockPrice").innerText = `NT$ ${Number.isFinite(close) ? close.toFixed(2) : '--'}`;
+    document.getElementById("stockVolume").innerText = Number.isFinite(volume) ? `${volume.toLocaleString()} 張` : '-- 張';
 
     // 決策訊號
-    setText("decisionDesc", `${decision.name}：${decision.desc}`);
+    document.getElementById("decisionDesc").innerText = `${decision.name}：${decision.desc}`;
     const badge = document.getElementById("signalBadge");
     const cardSignal = document.getElementById("cardSignal");
-    if (badge) badge.innerText = `${decision.name} | ${decision.signal}`;
+    badge.innerText = `${decision.name} | ${decision.signal}`;
 
     const colorMap = {
         red: { border: "border-rose-500/80", bg: "bg-rose-500/20", text: "text-rose-400", shadow: "shadow-rose-500/10" },
@@ -96,8 +69,8 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
         blue: { border: "border-sky-500/80", bg: "bg-sky-500/20", text: "text-sky-400", shadow: "shadow-sky-500/10" }
     };
     const c = colorMap[decision.color] || colorMap.blue;
-    if (cardSignal) cardSignal.className = `bg-slate-800 p-5 rounded-xl border-2 ${c.border} flex flex-col justify-between shadow-lg ${c.shadow}`;
-    if (badge) badge.className = `inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm ${c.bg} ${c.text} border ${c.border} text-center`;
+    cardSignal.className = `bg-slate-800 p-5 rounded-xl border-2 ${c.border} flex flex-col justify-between shadow-lg ${c.shadow}`;
+    badge.className = `inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm ${c.bg} ${c.text} border ${c.border} text-center`;
 
     // 四指標卡片
     updateCard("sdv", current.SDV, getSDVLevelDesc(current.SDV));
@@ -106,25 +79,23 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
     updateCard("bdv", current.BDV, getBDVLevelDesc(current.BDV));
 
     // ADV 風控樞紐
-    setText("advStopLossMode", advRiskControl.stopLossMode || '--');
-    setText("advStopLossRule", advRiskControl.stopLossRule || '--');
+    document.getElementById("advStopLossMode").innerText = advRiskControl.stopLossMode || '--';
+    document.getElementById("advStopLossRule").innerText = advRiskControl.stopLossRule || '--';
     const tpElem = document.getElementById("advTakeProfitAlert");
-    if (tpElem) {
-        tpElem.innerText = advRiskControl.takeProfitAlert || '常態監控中';
-        tpElem.className = advRiskControl.action === "EXIT_FULL"
-            ? "text-sm font-bold text-emerald-400 bg-emerald-950/50 p-2 rounded border border-emerald-500/50 animate-pulse"
-            : advRiskControl.action === "REDUCE_HALF"
-                ? "text-sm font-bold text-amber-400 bg-amber-950/50 p-2 rounded border border-amber-500/50"
-                : "text-sm font-semibold text-sky-400";
-    }
+    tpElem.innerText = advRiskControl.takeProfitAlert || '常態監控中';
+    tpElem.className = advRiskControl.action === "EXIT_FULL"
+        ? "text-sm font-bold text-emerald-400 bg-emerald-950/50 p-2 rounded border border-emerald-500/50 animate-pulse"
+        : advRiskControl.action === "REDUCE_HALF"
+            ? "text-sm font-bold text-amber-400 bg-amber-950/50 p-2 rounded border border-amber-500/50"
+            : "text-sm font-semibold text-sky-400";
 
     // Δ 動能矩陣
-    setHTML("deltaMatrixBody", `
+    document.getElementById("deltaMatrixBody").innerHTML = `
         ${renderRow("SDV (股價離差)", current.SDV, delta.SDV_1, delta.SDV_5, delta.SDV_10)}
         ${renderRow("VDV (量能離差)", current.VDV, delta.VDV_1, delta.VDV_5, delta.VDV_10)}
         ${renderRow("ADV (波動離差)", current.ADV, delta.ADV_1, delta.ADV_5, delta.ADV_10)}
         ${renderRow("BDV (帶寬離差)", current.BDV, delta.BDV_1, delta.BDV_5, delta.BDV_10)}
-    `);
+    `;
 
     // 歷史交易紀錄
     renderHistoryTable(history);
@@ -135,8 +106,8 @@ function updateUI(res, history, isBefore9AM, stockName, code) {
 // ============================================================
 function updateCard(type, val, desc) {
     const v = Number(val);
-    setText(`${type}Value`, Number.isFinite(v) ? v.toFixed(1) : '--');
-    setText(`${type}Status`, desc || '--');
+    document.getElementById(`${type}Value`).innerText = Number.isFinite(v) ? v.toFixed(1) : '--';
+    document.getElementById(`${type}Status`).innerText = desc || '--';
 }
 
 // ============================================================
@@ -163,7 +134,7 @@ function renderRow(label, curr, d1, d5, d10) {
 }
 
 // ============================================================
-// 歷史交易紀錄
+// 歷史交易紀錄（防禦性版本）
 // ============================================================
 function renderHistoryTable(history) {
     const tbody = document.getElementById("historyTableBody");
@@ -171,7 +142,7 @@ function renderHistoryTable(history) {
 
     if (!history || history.length === 0) {
         tbody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-slate-500 font-sans">尚無歷史交易紀錄</td></tr>`;
-        setText("historySummary", "近 6 個月尚無交易訊號");
+        document.getElementById("historySummary").innerText = "近 6 個月尚無交易訊號";
         return;
     }
 
@@ -228,7 +199,8 @@ function renderHistoryTable(history) {
     }).join("");
 
     const winRate = (winCount + lossCount) > 0 ? (winCount / (winCount + lossCount) * 100).toFixed(1) : '--';
-    setText("historySummary", `近 6 個月：${buyCount} 筆買入、${exitCount} 筆出場、勝率 ${winRate}%`);
+    document.getElementById("historySummary").innerText =
+        `近 6 個月：${buyCount} 筆買入、${exitCount} 筆出場、勝率 ${winRate}%`;
 }
 
 // ============================================================
