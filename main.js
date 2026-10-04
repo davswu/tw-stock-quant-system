@@ -3,7 +3,7 @@
  * 完整對齊《四指標趨勢分析說明文案 v11.0》與 quantEngine.js v11.0
  */
 
-const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx6sVnxWQJo-JT-SnhwRGbkoc85ADc9syU3Nzy7zAI/dev";
+const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx5h2Ncq111yq3k6tFffiOS9m0vOBtVywbsVdfZPCHvNbSv0vIGYiC_MimgkZGV3gbP/exec";
 
 const engine = new QuantEngine();
 
