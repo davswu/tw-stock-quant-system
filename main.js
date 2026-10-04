@@ -1,6 +1,6 @@
 /**
- * main.js - 四指標趨勢分析 UI 控制器 (v11.1.0 通用版)
- * 三倉按「訊號來源」分工，所有股票通用
+ * main.js - 四指標趨勢分析 UI 控制器 (v11.2.0 方案D定版)
+ * 資金配置：核心 85% / 戰術 15% / 機動倉取消
  */
 
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbyP4to4WeWt17kngG-5UpKIMPz3Mp3tKfzVt6mNBfOQkEuyGQK0rUNxyJHz1jo2_8Iz/exec";
@@ -128,16 +128,14 @@ function renderSignalBadge(candles) {
     return;
   }
 
-  // 依序檢查三倉：核心 → 戰術 → 機動
+  // 依序檢查兩倉：核心 → 戰術
   const coreDecision = engine.evaluateEntrySignal(candles, idx, 'core');
   const tacDecision = engine.evaluateEntrySignal(candles, idx, 'tactical');
-  const mobDecision = engine.evaluateEntrySignal(candles, idx, 'mobile');
 
   let decision = null;
   let poolName = '';
   if (coreDecision.signal === 'BUY') { decision = coreDecision; poolName = '核心倉'; }
   else if (tacDecision.signal === 'BUY') { decision = tacDecision; poolName = '戰術倉'; }
-  else if (mobDecision.signal === 'BUY') { decision = mobDecision; poolName = '機動倉'; }
 
   if (decision) {
     const gradeStyles = {
@@ -178,7 +176,7 @@ function renderSignalBadge(candles) {
   elBadge.textContent = `${state.icon} ${state.name} · 無訊號`;
 
   elDesc.className = "text-sm text-slate-400 mt-3 leading-relaxed";
-  elDesc.textContent = `當前 SDV ${Math.round(sdv)}，系統持續監控三倉訊號中。`;
+  elDesc.textContent = `當前 SDV ${Math.round(sdv)}，系統持續監控核心倉與戰術倉訊號。`;
 }
 
 function renderTScoreCards(candles) {
@@ -349,6 +347,7 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
     return;
   }
 
+  // 加權總報酬（85/15）
   if (summaryEl && backtestResult) {
     const wins = trades.filter(t => t.pnlPct > 0).length;
     const winRate = Math.round((wins / trades.length) * 100);
@@ -356,15 +355,13 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
 
     const coreRet = p['核心倉']?.returnPct ?? 0;
     const tacRet = p['戰術倉']?.returnPct ?? 0;
-    const mobRet = p['機動倉']?.returnPct ?? 0;
 
-    const weighted = coreRet * 0.60 + tacRet * 0.25 + mobRet * 0.15;
+    const weighted = coreRet * 0.85 + tacRet * 0.15;
 
     summaryEl.innerHTML = `
       共 ${trades.length} 筆 | 勝率 ${winRate}% (${wins}勝/${trades.length - wins}敗) |
       核心倉 <span class="${coreRet >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${coreRet >= 0 ? '+' : ''}${coreRet}%</span> |
       戰術倉 <span class="${tacRet >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${tacRet >= 0 ? '+' : ''}${tacRet}%</span> |
-      機動倉 <span class="${mobRet >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${mobRet >= 0 ? '+' : ''}${mobRet}%</span> |
       加權總報酬 <strong class="${weighted >= 0 ? 'text-emerald-300' : 'text-rose-300'}">${weighted >= 0 ? '+' : ''}${weighted.toFixed(2)}%</strong>
     `;
   }
@@ -391,7 +388,7 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
 
     const poolBadge = t.pool ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-600">${t.pool}</span>` : '';
 
-    const partialMark = t.partial ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300">部分</span>` : '';
+    const partialMark = t.partial ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300">${t.partialCount}段</span>` : '';
 
     row.innerHTML = `
       <td class="p-3 text-slate-300">${t.buyDate}</td>
