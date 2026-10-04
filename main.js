@@ -4,7 +4,7 @@
  * 資金配置：核心 60% / 戰術 25% / 機動 15%
  */
 
-const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx6sVnxWQJo-JT-SnhwRGbkoc85ADc9syU3Nzy7zAI/dev";
+const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx5h2Ncq111yq3k6tFffiOS9m0vOBtVywbsVdfZPCHvNbSv0vIGYiC_MimgkZGV3gbP/exec";
 
 const engine = new QuantEngine();
 
