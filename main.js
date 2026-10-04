@@ -1,9 +1,10 @@
 /**
  * main.js - 四指標趨勢分析 UI 控制器 (v11.0 日線級高頻高報酬版)
  * 完整對齊《四指標趨勢分析說明文案 v11.0》與 quantEngine.js v11.0
+ * 資金配置：核心 60% / 戰術 25% / 機動 15%
  */
 
-const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx5h2Ncq111yq3k6tFffiOS9m0vOBtVywbsVdfZPCHvNbSv0vIGYiC_MimgkZGV3gbP/exec";
+const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx6sVnxWQJo-JT-SnhwRGbkoc85ADc9syU3Nzy7zAI/dev";
 
 const engine = new QuantEngine();
 
@@ -11,6 +12,9 @@ document.addEventListener('DOMContentLoaded', () => {
   analyzeStock();
 });
 
+/**
+ * 主分析進入點
+ */
 async function analyzeStock() {
   const elStockInput = document.getElementById('stockInput');
   const elDesc = document.getElementById('decisionDesc');
@@ -24,6 +28,7 @@ async function analyzeStock() {
   try {
     const requestUrl = `${GAS_API_URL}?stock=${encodeURIComponent(stockCode)}`;
     const response = await fetch(requestUrl, { method: 'GET', redirect: 'follow' });
+
     if (!response.ok) throw new Error(`HTTP 錯誤碼: ${response.status}`);
 
     const rawResult = await response.json();
@@ -31,11 +36,13 @@ async function analyzeStock() {
 
     const stockName = rawResult.stockName || stockCode;
     const rawCandles = rawResult.data || rawResult.candles || rawResult;
+
     if (!Array.isArray(rawCandles) || rawCandles.length === 0) {
       throw new Error(`查無股票代碼 [${stockCode}] 之有效 K 線數據`);
     }
 
     const candles = normalizeCandleData(rawCandles);
+
     if (candles.length < 48) {
       throw new Error(`數據長度僅 ${candles.length} 天，不足 48 天指標暖機門檻`);
     }
@@ -59,6 +66,9 @@ async function analyzeStock() {
   }
 }
 
+/**
+ * 資料清洗與轉換
+ */
 function normalizeCandleData(data) {
   return data.map(item => ({
     date: item.date || item.Date || item.time || '',
@@ -70,9 +80,13 @@ function normalizeCandleData(data) {
   })).filter(c => c.close > 0 && c.date !== '');
 }
 
+/**
+ * 1. 渲染股票名稱、股價與成交量
+ */
 function renderHeaderAndStockInfo(code, name, candles) {
   const last = candles[candles.length - 1];
   const prev = candles[candles.length - 2] || last;
+
   const priceDiff = last.close - prev.close;
   const pricePct = ((priceDiff / prev.close) * 100).toFixed(2);
   const isUp = priceDiff >= 0;
@@ -99,13 +113,14 @@ function renderHeaderAndStockInfo(code, name, candles) {
 }
 
 /**
- * 訊號徽章（支援 T 級戰術動能）
+ * 2. 渲染當前系統決策訊號（四軌 + T 級）
  */
 function renderSignalBadge(candles) {
   const idx = candles.length - 1;
   const last = candles[idx];
   const elBadge = document.getElementById('signalBadge');
   const elDesc = document.getElementById('decisionDesc');
+
   if (!elBadge || !elDesc) return;
 
   if (last.sdv === null || last.sdv === undefined) {
@@ -117,7 +132,7 @@ function renderSignalBadge(candles) {
   }
 
   // 依評估順序：軌 1 → 軌 3 → 軌 2 → 軌 4
-  const decision = engine.evaluateEntrySignal(candles, idx, [1, 3, 2, 4]);
+  const decision = engine.evaluateEntrySignal(candles, idx, [1, 3, 2, 4], false);
 
   if (decision.signal === 'BUY') {
     const gradeStyles = {
@@ -144,9 +159,9 @@ function renderSignalBadge(candles) {
     return;
   }
 
-  // 無訊號：顯示位階狀態
   const sdv = last.sdv;
   let state = { name: '中性觀望', color: 'text-slate-300', bg: 'bg-slate-700', icon: '💤' };
+
   if (sdv >= 70) state = { name: '高位警戒', color: 'text-amber-400', bg: 'bg-amber-500/20', icon: '⚠️' };
   else if (sdv >= 60) state = { name: '多頭強勢', color: 'text-rose-400', bg: 'bg-rose-500/20', icon: '🔥' };
   else if (sdv >= 50) state = { name: '中性偏多', color: 'text-sky-400', bg: 'bg-sky-500/20', icon: '💤' };
@@ -156,16 +171,22 @@ function renderSignalBadge(candles) {
 
   elBadge.className = `inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm ${state.bg} ${state.color} border border-slate-600 text-center`;
   elBadge.textContent = `${state.icon} ${state.name} · 無訊號`;
+
   elDesc.className = "text-sm text-slate-400 mt-3 leading-relaxed";
   elDesc.textContent = `當前 SDV ${Math.round(sdv)}，系統持續監控四軌訊號中。`;
 }
 
+/**
+ * 3. 渲染 4 大指標 T-Score 卡片
+ */
 function renderTScoreCards(candles) {
   const last = candles[candles.length - 1];
+
   const updateCard = (valId, statusId, value, highLimit, lowLimit) => {
     const elVal = document.getElementById(valId);
     const elStatus = document.getElementById(statusId);
     if (!elVal || !elStatus) return;
+
     if (value === null || value === undefined) {
       elVal.textContent = '--';
       elVal.className = "text-4xl font-extrabold font-mono text-slate-500";
@@ -173,8 +194,10 @@ function renderTScoreCards(candles) {
       elStatus.className = "text-xs mt-2 text-slate-400";
       return;
     }
+
     const roundVal = Math.round(value);
     elVal.textContent = roundVal;
+
     if (roundVal >= highLimit) {
       elVal.className = "text-4xl font-extrabold font-mono text-amber-400";
       elStatus.textContent = "高位強勢 / 過熱警戒";
@@ -189,18 +212,24 @@ function renderTScoreCards(candles) {
       elStatus.className = "text-xs mt-2 text-slate-400";
     }
   };
+
   updateCard('sdvValue', 'sdvStatus', last.sdv, 65, 35);
   updateCard('vdvValue', 'vdvStatus', last.vdv, 60, 30);
   updateCard('advValue', 'advStatus', last.adv, 60, 30);
   updateCard('bdvValue', 'bdvStatus', last.bdv, 65, 35);
 }
 
+/**
+ * 4. 渲染 ADV 動態移動風控樞紐
+ */
 function renderAdvRiskHub(candles) {
   const last = candles[candles.length - 1];
   const prev = candles[candles.length - 2] || last;
+
   const modeEl = document.getElementById('advStopLossMode');
   const ruleEl = document.getElementById('advStopLossRule');
   const alertEl = document.getElementById('advTakeProfitAlert');
+
   if (!modeEl || !ruleEl || !alertEl) return;
 
   if (last.adv === null || last.atr === null) {
@@ -210,12 +239,12 @@ function renderAdvRiskHub(candles) {
     return;
   }
 
-  // v11.0：依 ADV 動態倍數（1.5 / 2.0 / 2.5 / 3.0）
   let stopMult;
   if (last.adv < 40) stopMult = 1.5;
   else if (last.adv < 60) stopMult = 2.0;
   else if (last.adv < 70) stopMult = 2.5;
   else stopMult = 3.0;
+
   const stopPrice = last.close - stopMult * last.atr;
 
   if (last.adv >= 70) {
@@ -240,6 +269,7 @@ function renderAdvRiskHub(candles) {
 
   const d1adv = last.adv - prev.adv;
   const sdv = last.sdv;
+
   if (sdv >= 70 && last.adv >= 60) {
     alertEl.textContent = "🚨 過熱高潮警戒：SDV ≥ 70 且 ADV ≥ 60";
     alertEl.className = "text-sm font-bold text-rose-400 animate-pulse";
@@ -255,9 +285,13 @@ function renderAdvRiskHub(candles) {
   }
 }
 
+/**
+ * 5. 渲染多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)
+ */
 function renderDeltaMatrix(candles) {
   const tbody = document.getElementById('deltaMatrixBody');
   if (!tbody) return;
+
   const len = candles.length;
   const last = candles[len - 1];
   const c1 = candles[len - 2] || last;
@@ -284,6 +318,7 @@ function renderDeltaMatrix(candles) {
     const d1 = (current !== null && c1[ind.key] !== null) ? current - c1[ind.key] : null;
     const d5 = (current !== null && c5[ind.key] !== null) ? current - c5[ind.key] : null;
     const d10 = (current !== null && c10[ind.key] !== null) ? current - c10[ind.key] : null;
+
     return `
       <tr class="hover:bg-slate-800/50 transition border-b border-slate-700/30">
         <td class="p-3 text-left font-sans text-slate-200">${ind.name}</td>
@@ -297,12 +332,13 @@ function renderDeltaMatrix(candles) {
 }
 
 /**
- * 歷史交易紀錄表（v11.0：顯示資金池歸屬）
+ * 6. 渲染歷史交易紀錄表（含加權總報酬）
  */
 function renderHistoryTable(trades, dataLength, backtestResult) {
   const tbody = document.getElementById('historyTableBody');
   const summaryEl = document.getElementById('historySummary');
   if (!tbody) return;
+
   tbody.innerHTML = '';
 
   if (dataLength < 58) {
@@ -321,30 +357,51 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
     return;
   }
 
+  // ===== 加權總報酬顯示 =====
   if (summaryEl && backtestResult) {
     const wins = trades.filter(t => t.pnlPct > 0).length;
     const winRate = Math.round((wins / trades.length) * 100);
     const p = backtestResult.pools || {};
-    const poolText = Object.keys(p).map(k => `${k} ${p[k].returnPct >= 0 ? '+' : ''}${p[k].returnPct}%`).join(' | ');
-    summaryEl.textContent = `共 ${trades.length} 筆 | 勝率 ${winRate}% (${wins}勝/${trades.length - wins}敗) | ${poolText}`;
+
+    const coreRet = p['核心倉']?.returnPct || 0;
+    const tacRet = p['戰術倉']?.returnPct || 0;
+    const mobRet = p['機動倉']?.returnPct || 0;
+
+    // 加權總報酬（60/25/15）
+    const weighted = coreRet * 0.60 + tacRet * 0.25 + mobRet * 0.15;
+
+    summaryEl.innerHTML = `
+      共 ${trades.length} 筆 | 勝率 ${winRate}% (${wins}勝/${trades.length - wins}敗) |
+      核心倉 <span class="${coreRet >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${coreRet >= 0 ? '+' : ''}${coreRet}%</span> |
+      戰術倉 <span class="${tacRet >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${tacRet >= 0 ? '+' : ''}${tacRet}%</span> |
+      機動倉 <span class="${mobRet >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${mobRet >= 0 ? '+' : ''}${mobRet}%</span> |
+      加權總報酬 <strong class="${weighted >= 0 ? 'text-emerald-300' : 'text-rose-300'}">${weighted >= 0 ? '+' : ''}${weighted.toFixed(2)}%</strong>
+    `;
   }
 
   trades.forEach(t => {
     const row = document.createElement('tr');
     row.className = 'border-b border-slate-700/40 hover:bg-slate-800/60 transition';
+
     const isProfit = t.pnlPct > 0;
     const pnlBadge = `<span class="text-xs px-2 py-0.5 rounded ${isProfit ? 'bg-emerald-950 text-emerald-400 border border-emerald-700/50' : 'bg-rose-950 text-rose-400 border border-rose-700/50'}">
       ${isProfit ? '+' : ''}${t.pnlPct}%
     </span>`;
+
     const trackBadge = t.track ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">軌${t.track}</span>` : '';
+
     const gradeColor = t.grade === 'A' ? 'bg-emerald-900 text-emerald-300'
       : t.grade === 'B' ? 'bg-sky-900 text-sky-300'
       : t.grade === 'S' ? 'bg-purple-900 text-purple-300'
       : t.grade === 'T' ? 'bg-rose-900 text-rose-300'
       : 'bg-amber-900 text-amber-300';
     const gradeBadge = t.grade ? `<span class="text-[10px] px-1.5 py-0.5 rounded ${gradeColor}">${t.grade}級</span>` : '';
+
     const addMark = t.addCount > 0 ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-950 text-amber-300">+${t.addCount}</span>` : '';
+
     const poolBadge = t.pool ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-600">${t.pool}</span>` : '';
+
+    const partialMark = t.partial ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300">部分</span>` : '';
 
     row.innerHTML = `
       <td class="p-3 text-slate-300">${t.buyDate}</td>
@@ -361,6 +418,7 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
       <td class="p-3">
         <div class="flex items-center justify-center gap-2">
           ${pnlBadge}
+          ${partialMark}
           <span class="text-xs text-slate-400">${t.sellReason}</span>
         </div>
       </td>

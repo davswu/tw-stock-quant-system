@@ -8,11 +8,11 @@
  * 2. 多週期動能 Δ₁ / Δ₅ / Δ₁₀
  * 3. 四軌進場（軌 1 → 軌 3 → 軌 2 → 軌 4）
  * 4. 五層出場（ATR停損 / 移動停利 / 訊號反轉 / 時間停損 / 戰術動能出場）
- * 5. 三層資金架構（核心 60% / 戰術 30% / 機動 10%）
+ * 5. 三層資金架構（核心 60% / 戰術 25% / 機動 15%）
  * 6. A/B/C/S/T 五級訊號
- * 7. 冷卻期（2/4/6 天，獲利免冷卻，大盤多頭減半）
+ * 7. 冷卻期（2/4/6 天，獲利免冷卻）
  * 8. 排除條款 E1~E6
- * 9. 高位禁買（最近 5 日 SDV > 75）
+ * 9. 機動倉專用：僅極致超跌訊號
  */
 
 const QuantConfig = {
@@ -23,10 +23,10 @@ const QuantConfig = {
   COMMISSION: 0.001425,
   TAX: 0.003,
 
-  // ===== v11.0 三層資金架構 =====
+  // ===== v11.0 三層資金架構（60/25/15）=====
   CORE_PCT: 0.60,
-  TACTICAL_PCT: 0.30,
-  MOBILE_PCT: 0.10,
+  TACTICAL_PCT: 0.25,
+  MOBILE_PCT: 0.15,
 
   // 評分門檻
   A_GRADE: 70,
@@ -44,8 +44,9 @@ const QuantConfig = {
   INIT_S_SIZE: 0.30,
   INIT_C_SIZE: 0.30,
   INIT_T_SIZE: 0.30,
+  INIT_MOBILE_SIZE: 0.50,
 
-  // ===== v11.0 加碼門檻（放寬）=====
+  // 加碼門檻（v11.0 放寬）
   ADD1_RET: 4.0,
   ADD2_RET: 8.0,
   ADD3_RET: 15.0,
@@ -57,14 +58,14 @@ const QuantConfig = {
   ADD3_SIZE_B: 0.10,
   ADD_SC_SIZE: 0.40,
 
-  // ===== v11.0 出場 / 冷卻（高頻版）=====
+  // 出場 / 冷卻（高頻版）
   TIME_STOP_DAYS: 20,
   TIME_STOP_MIN_RET: 8.0,
   COOLDOWN_1: 2,
   COOLDOWN_2: 4,
   COOLDOWN_3: 6,
 
-  // ===== v11.0 軌道 3（盤整突破，放寬）=====
+  // 軌道 3（盤整突破，放寬）
   SQUEEZE_BDV_MAX: 45,
   SQUEEZE_VOL_RATIO: 1.10,
   SQUEEZE_SDV_MIN: 48,
@@ -72,7 +73,7 @@ const QuantConfig = {
   SQUEEZE_D1_SDV_MIN: 1.5,
   SQUEEZE_D1_BDV_MIN: 0.5,
 
-  // ===== v11.0 軌道 2（早期試單，放寬）=====
+  // 軌道 2（早期試單，放寬）
   EARLY_MA20_DIST: 0.025,
   EARLY_SDV_MIN: 45,
   EARLY_SDV_MAX: 60,
@@ -80,7 +81,7 @@ const QuantConfig = {
   EARLY_VDV_MAX: 65,
   EARLY_MUTEX_DAYS: 2,
 
-  // ===== v11.0 軌道 4（戰術動能，新增）=====
+  // 軌道 4（戰術動能）
   TACTICAL_D1_SDV_MIN: 3,
   TACTICAL_D1_VDV_MIN: 3,
   TACTICAL_ADV_MIN: 35,
@@ -90,16 +91,16 @@ const QuantConfig = {
   TACTICAL_SDV_MIN: 45,
   TACTICAL_SDV_MAX: 68,
 
-  // ===== v11.0 戰術倉專用出場 =====
+  // 戰術倉專用出場
   TACTICAL_TP_HALF: 5,
   TACTICAL_TP_FULL: 10,
   TACTICAL_SL_PCT: -3,
   TACTICAL_SL_ATR: 1.5,
 
-  // ===== v11.0 排除條款 E5 / E6 =====
+  // 排除條款 E5 / E6
   E5_SDV_MAX: 75,
   E5_D5_SDV_MAX: 25,
-  E6_MIN_VOLUME: 5000000, // 5000 張
+  E6_MIN_VOLUME: 5000000,
 
   DEBUG: false
 };
@@ -107,7 +108,9 @@ const QuantConfig = {
 class QuantEngine {
   constructor(config = QuantConfig) {
     this.config = { ...QuantConfig, ...config };
-    this._log = this.config.DEBUG ? (msg) => console.log(`[Engine] ${msg}`) : () => {};
+    this._log = this.config.DEBUG
+      ? (msg) => console.log(`[Engine] ${msg}`)
+      : () => {};
   }
 
   // ============================================================
@@ -130,8 +133,9 @@ class QuantEngine {
       }
     }
     for (let i = 0; i < len; i++) {
-      if (i < cfg.ATR_PERIOD - 1) { result[i].atr = null; }
-      else {
+      if (i < cfg.ATR_PERIOD - 1) {
+        result[i].atr = null;
+      } else {
         let sum = 0;
         for (let k = i - cfg.ATR_PERIOD + 1; k <= i; k++) sum += trArr[k];
         result[i].atr = sum / cfg.ATR_PERIOD;
@@ -140,7 +144,11 @@ class QuantEngine {
 
     // ---- 2. MA20 + Bandwidth(20,2) ----
     for (let i = 0; i < len; i++) {
-      if (i < cfg.BB_PERIOD - 1) { result[i].ma20 = null; result[i].bw = null; continue; }
+      if (i < cfg.BB_PERIOD - 1) {
+        result[i].ma20 = null;
+        result[i].bw = null;
+        continue;
+      }
       const slice = result.slice(i - cfg.BB_PERIOD + 1, i + 1).map(d => d.close);
       const mean = slice.reduce((a, b) => a + b, 0) / cfg.BB_PERIOD;
       const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / cfg.BB_PERIOD;
@@ -149,11 +157,14 @@ class QuantEngine {
       result[i].bw = mean === 0 ? 0 : (4 * std) / mean;
     }
 
-    // ---- 3. 對數 T-Score ----
+    // ---- 3. 對數 T-Score（SDV / VDV / ADV / BDV）----
     const minIdx = Math.max(cfg.WINDOW + cfg.ATR_PERIOD, cfg.WINDOW + cfg.BB_PERIOD) - 1;
     for (let i = 0; i < len; i++) {
       if (i < minIdx) {
-        result[i].sdv = result[i].vdv = result[i].adv = result[i].bdv = null;
+        result[i].sdv = null;
+        result[i].vdv = null;
+        result[i].adv = null;
+        result[i].bdv = null;
         continue;
       }
       const startIdx = i - cfg.WINDOW + 1;
@@ -167,7 +178,10 @@ class QuantEngine {
         lnB.push(Math.log(Math.max(result[k].bw, 1e-9)));
       }
       if (!valid || lnP.length < cfg.WINDOW) {
-        result[i].sdv = result[i].vdv = result[i].adv = result[i].bdv = null;
+        result[i].sdv = null;
+        result[i].vdv = null;
+        result[i].adv = null;
+        result[i].bdv = null;
         continue;
       }
       const calcTS = (val, lnArr) => {
@@ -188,73 +202,117 @@ class QuantEngine {
     const deltaKeys = ['sdv', 'vdv', 'adv', 'bdv'];
     for (let i = 0; i < len; i++) {
       deltaKeys.forEach(k => {
-        result[i][`d1_${k}`] = (i >= 1 && result[i][k] !== null && result[i - 1][k] !== null) ? result[i][k] - result[i - 1][k] : null;
-        result[i][`d5_${k}`] = (i >= 5 && result[i][k] !== null && result[i - 5][k] !== null) ? result[i][k] - result[i - 5][k] : null;
-        result[i][`d10_${k}`] = (i >= 10 && result[i][k] !== null && result[i - 10][k] !== null) ? result[i][k] - result[i - 10][k] : null;
+        result[i][`d1_${k}`] = (i >= 1 && result[i][k] !== null && result[i - 1][k] !== null)
+          ? result[i][k] - result[i - 1][k] : null;
+        result[i][`d5_${k}`] = (i >= 5 && result[i][k] !== null && result[i - 5][k] !== null)
+          ? result[i][k] - result[i - 5][k] : null;
+        result[i][`d10_${k}`] = (i >= 10 && result[i][k] !== null && result[i - 10][k] !== null)
+          ? result[i][k] - result[i - 10][k] : null;
       });
     }
 
-    // ---- 5. high20 與 vol5（前 N 日、不含今日）----
+    // ---- 5. high20 與 vol5 ----
     for (let i = 0; i < len; i++) {
-      if (i < 20) { result[i].high20 = null; result[i].vol5 = null; }
-      else {
+      if (i < 20) {
+        result[i].high20 = null;
+        result[i].vol5 = null;
+      } else {
         let maxHigh = -Infinity;
-        for (let k = i - 20; k < i; k++) if (result[k].close > maxHigh) maxHigh = result[k].close;
+        for (let k = i - 20; k < i; k++) {
+          if (result[k].close > maxHigh) maxHigh = result[k].close;
+        }
         result[i].high20 = maxHigh;
+
         let volSum = 0;
         for (let k = i - 5; k < i; k++) volSum += result[k].volume;
         result[i].vol5 = volSum / 5;
       }
     }
+
     return result;
   }
 
   // ============================================================
-  // 排除條款 E1~E6（v11.0 擴充）
+  // 排除條款 E1~E6
   // ============================================================
   isExcluded(r, isTactical = false) {
     if (r.sdv >= 80) return 'E1';
     if (r.d5_sdv !== null && r.d5_sdv >= 25) return 'E2';
     if (r.ma20 && r.close > r.ma20 * 1.20) return 'E3';
     if (r.d10_bdv !== null && r.d10_bdv >= 15 && r.sdv >= 70) return 'E4';
-    // E5：戰術訊號專用
     if (isTactical) {
       if (r.sdv >= this.config.E5_SDV_MAX) return 'E5';
       if (r.d5_sdv !== null && r.d5_sdv >= this.config.E5_D5_SDV_MAX) return 'E5';
     }
-    // E6：流動性不足
     if (r.volume < this.config.E6_MIN_VOLUME) return 'E6';
     return null;
   }
 
   // ============================================================
   // 四軌進場評估（軌 1 → 軌 3 → 軌 2 → 軌 4）
-  // allowedTracks: 允許檢查的軌道陣列，例如 [1] 表示只檢查軌 1
   // ============================================================
-  evaluateEntrySignal(df, i, allowedTracks = [1, 2, 3, 4]) {
+  evaluateEntrySignal(df, i, allowedTracks = [1, 2, 3, 4], isMobile = false) {
     if (i < 10) return { signal: 'WAIT' };
     const r = df[i];
     const cfg = this.config;
 
-    if (r.sdv === null || r.vdv === null || r.adv === null || r.bdv === null) return { signal: 'WAIT' };
+    if (r.sdv === null || r.vdv === null || r.adv === null || r.bdv === null) {
+      return { signal: 'WAIT' };
+    }
 
     // 高位禁買
     let recentSdvMax = 0;
     for (let k = Math.max(0, i - cfg.HIGH_SDV_LOOKBACK); k <= i; k++) {
-      if (df[k] && df[k].sdv !== null && df[k].sdv > recentSdvMax) recentSdvMax = df[k].sdv;
+      if (df[k] && df[k].sdv !== null && df[k].sdv > recentSdvMax) {
+        recentSdvMax = df[k].sdv;
+      }
     }
     if (recentSdvMax > cfg.HIGH_SDV_FORBID) return { signal: 'WAIT' };
+
+    // ===== 機動倉專用：僅允許極致超跌 =====
+    if (isMobile) {
+      if (r.adv >= 60 && r.bdv >= 60 && r.sdv < 35 && r.vdv >= 60) {
+        let s = 0;
+        if (r.d10_sdv !== null && r.d10_sdv <= -10) s += 15;
+        if (r.d10_vdv !== null && r.d10_vdv >= 10) s += 15;
+        if (r.d10_adv !== null && r.d10_adv >= 10) s += 10;
+        if (r.d10_bdv !== null && r.d10_bdv >= 10) s += 10;
+        if (r.d5_sdv !== null && r.d5_sdv <= -10) s += 15;
+        if (r.d1_sdv !== null && r.d1_sdv >= 3) s += 15;
+        if (r.d1_adv !== null && r.d1_adv <= -3) s += 10;
+        if (r.d1_bdv !== null && r.d1_bdv <= -3) s += 10;
+
+        if (s >= cfg.EXTREME_GRADE) {
+          const ex = this.isExcluded(r);
+          if (!ex) {
+            const grade = s >= cfg.A_GRADE ? 'A' : 'B';
+            return {
+              signal: 'BUY', track: 1, type: '極致超跌', score: s, grade,
+              size: cfg.INIT_MOBILE_SIZE, price: r.close
+            };
+          }
+        }
+      }
+      return { signal: 'WAIT' };
+    }
 
     // ===== 軌道 1：常規訊號 =====
     if (allowedTracks.includes(1)) {
       // 1-1. 突破前高
-      if (r.high20 !== null && r.close >= r.high20 && r.vdv >= 60 && r.sdv >= 50 && r.sdv <= 65) {
+      if (r.high20 !== null && r.close >= r.high20 &&
+          r.vdv >= 60 && r.sdv >= 50 && r.sdv <= 65) {
         const ex = this.isExcluded(r);
-        if (!ex) return { signal: 'BUY', track: 1, type: '突破前高', score: 70, grade: 'B', size: cfg.INIT_B_SIZE, price: r.close };
+        if (!ex) {
+          return {
+            signal: 'BUY', track: 1, type: '突破前高', score: 70,
+            grade: 'B', size: cfg.INIT_B_SIZE, price: r.close
+          };
+        }
       }
 
       // 1-2. 蓄勢突破
-      if (r.adv >= 35 && r.adv <= 65 && r.bdv < 55 && r.sdv >= 45 && r.sdv <= 68 && r.vdv >= 50) {
+      if (r.adv >= 35 && r.adv <= 65 && r.bdv < 55 &&
+          r.sdv >= 45 && r.sdv <= 68 && r.vdv >= 50) {
         let s = 0;
         if (r.d10_sdv !== null && r.d10_sdv >= 3) s += 10;
         if (r.d10_vdv !== null && r.d10_vdv > 0) s += 10;
@@ -266,17 +324,23 @@ class QuantEngine {
         if (r.d1_sdv !== null && r.d1_sdv >= 3) s += 10;
         if (r.d1_vdv !== null && r.d1_vdv >= 3) s += 10;
         if (r.d1_bdv !== null && r.d1_bdv >= 3) s += 10;
+
         if (s >= cfg.B_GRADE) {
           const ex = this.isExcluded(r);
           if (!ex) {
             const grade = s >= cfg.A_GRADE ? 'A' : 'B';
-            return { signal: 'BUY', track: 1, type: '蓄勢突破', score: s, grade, size: grade === 'A' ? cfg.INIT_A_SIZE : cfg.INIT_B_SIZE, price: r.close };
+            return {
+              signal: 'BUY', track: 1, type: '蓄勢突破', score: s, grade,
+              size: grade === 'A' ? cfg.INIT_A_SIZE : cfg.INIT_B_SIZE,
+              price: r.close
+            };
           }
         }
       }
 
       // 1-3. 順勢拉回
-      if (r.adv >= 35 && r.adv <= 65 && r.bdv >= 40 && r.bdv <= 70 && r.sdv >= 45 && r.sdv <= 65 && r.vdv < 50) {
+      if (r.adv >= 35 && r.adv <= 65 && r.bdv >= 40 && r.bdv <= 70 &&
+          r.sdv >= 45 && r.sdv <= 65 && r.vdv < 50) {
         let s = 0;
         if (r.d10_sdv !== null && r.d10_sdv >= 3) s += 10;
         if (r.d10_vdv !== null && r.d10_vdv >= 3) s += 10;
@@ -288,11 +352,16 @@ class QuantEngine {
         if (r.d1_sdv !== null && r.d1_sdv >= 3) s += 10;
         if (r.d1_vdv !== null && r.d1_vdv > 0) s += 10;
         if (r.d1_bdv !== null && r.d1_bdv >= 0) s += 10;
+
         if (s >= cfg.B_GRADE) {
           const ex = this.isExcluded(r);
           if (!ex) {
             const grade = s >= cfg.A_GRADE ? 'A' : 'B';
-            return { signal: 'BUY', track: 1, type: '順勢拉回', score: s, grade, size: grade === 'A' ? cfg.INIT_A_SIZE : cfg.INIT_B_SIZE, price: r.close };
+            return {
+              signal: 'BUY', track: 1, type: '順勢拉回', score: s, grade,
+              size: grade === 'A' ? cfg.INIT_A_SIZE : cfg.INIT_B_SIZE,
+              price: r.close
+            };
           }
         }
       }
@@ -300,7 +369,8 @@ class QuantEngine {
       // 1-4. 假跌破掃蕩
       if (i > 0) {
         const prev = df[i - 1];
-        if (r.adv >= 45 && r.adv <= 70 && r.bdv < 60 && prev.sdv !== null && prev.sdv < 55 && r.sdv >= 45) {
+        if (r.adv >= 45 && r.adv <= 70 && r.bdv < 60 &&
+            prev.sdv !== null && prev.sdv < 55 && r.sdv >= 45) {
           let s = 0;
           if (r.d10_sdv !== null && r.d10_sdv >= 0) s += 10;
           if (r.d5_sdv !== null && r.d5_sdv <= -3) s += 15;
@@ -309,11 +379,16 @@ class QuantEngine {
           if (r.d1_sdv !== null && r.d1_sdv >= 10) s += 20;
           if (r.d1_vdv !== null && r.d1_vdv >= 3) s += 15;
           if (r.d1_bdv !== null && r.d1_bdv >= 3) s += 15;
+
           if (s >= cfg.B_GRADE) {
             const ex = this.isExcluded(r);
             if (!ex) {
               const grade = s >= cfg.A_GRADE ? 'A' : 'B';
-              return { signal: 'BUY', track: 1, type: '假跌破掃蕩', score: s, grade, size: grade === 'A' ? cfg.INIT_A_SIZE : cfg.INIT_B_SIZE, price: r.close };
+              return {
+                signal: 'BUY', track: 1, type: '假跌破掃蕩', score: s, grade,
+                size: grade === 'A' ? cfg.INIT_A_SIZE : cfg.INIT_B_SIZE,
+                price: r.close
+              };
             }
           }
         }
@@ -330,17 +405,22 @@ class QuantEngine {
         if (r.d1_sdv !== null && r.d1_sdv >= 3) s += 15;
         if (r.d1_adv !== null && r.d1_adv <= -3) s += 10;
         if (r.d1_bdv !== null && r.d1_bdv <= -3) s += 10;
+
         if (s >= cfg.EXTREME_GRADE) {
           const ex = this.isExcluded(r);
           if (!ex) {
             const grade = s >= cfg.A_GRADE ? 'A' : 'B';
-            return { signal: 'BUY', track: 1, type: '極致超跌', score: s, grade, size: grade === 'A' ? cfg.INIT_A_SIZE : cfg.INIT_B_SIZE, price: r.close };
+            return {
+              signal: 'BUY', track: 1, type: '極致超跌', score: s, grade,
+              size: grade === 'A' ? cfg.INIT_A_SIZE : cfg.INIT_B_SIZE,
+              price: r.close
+            };
           }
         }
       }
     }
 
-    // ===== 軌道 3：盤整突破（v11.0 放寬）=====
+    // ===== 軌道 3：盤整突破 =====
     if (allowedTracks.includes(3)) {
       if (r.bdv !== null && r.bdv < cfg.SQUEEZE_BDV_MAX &&
           r.sdv >= cfg.SQUEEZE_SDV_MIN && r.sdv <= cfg.SQUEEZE_SDV_MAX &&
@@ -348,11 +428,16 @@ class QuantEngine {
           r.d1_sdv !== null && r.d1_sdv >= cfg.SQUEEZE_D1_SDV_MIN &&
           r.d1_bdv !== null && r.d1_bdv >= cfg.SQUEEZE_D1_BDV_MIN) {
         const ex = this.isExcluded(r);
-        if (!ex) return { signal: 'BUY', track: 3, type: '盤整突破', score: 60, grade: 'S', size: cfg.INIT_S_SIZE, price: r.close };
+        if (!ex) {
+          return {
+            signal: 'BUY', track: 3, type: '盤整突破', score: 60,
+            grade: 'S', size: cfg.INIT_S_SIZE, price: r.close
+          };
+        }
       }
     }
 
-    // ===== 軌道 2：早期試單（v11.0 放寬）=====
+    // ===== 軌道 2：早期試單 =====
     if (allowedTracks.includes(2)) {
       if (r.ma20) {
         const dist = Math.abs(r.close - r.ma20) / r.ma20;
@@ -367,21 +452,31 @@ class QuantEngine {
           }
           if (!hasRecentRegular) {
             const ex = this.isExcluded(r);
-            if (!ex) return { signal: 'BUY', track: 2, type: '早期試單', score: 55, grade: 'C', size: cfg.INIT_C_SIZE, price: r.close };
+            if (!ex) {
+              return {
+                signal: 'BUY', track: 2, type: '早期試單', score: 55,
+                grade: 'C', size: cfg.INIT_C_SIZE, price: r.close
+              };
+            }
           }
         }
       }
     }
 
-    // ===== 軌道 4：戰術動能（v11.0 新增）=====
+    // ===== 軌道 4：戰術動能 =====
     if (allowedTracks.includes(4)) {
       if (r.d1_sdv !== null && r.d1_sdv >= cfg.TACTICAL_D1_SDV_MIN &&
           r.d1_vdv !== null && r.d1_vdv >= cfg.TACTICAL_D1_VDV_MIN &&
           r.adv >= cfg.TACTICAL_ADV_MIN && r.adv <= cfg.TACTICAL_ADV_MAX &&
           r.bdv >= cfg.TACTICAL_BDV_MIN && r.bdv <= cfg.TACTICAL_BDV_MAX &&
           r.sdv >= cfg.TACTICAL_SDV_MIN && r.sdv <= cfg.TACTICAL_SDV_MAX) {
-        const ex = this.isExcluded(r, true); // true 表示戰術倉
-        if (!ex) return { signal: 'BUY', track: 4, type: '戰術動能', score: 60, grade: 'T', size: cfg.INIT_T_SIZE, price: r.close };
+        const ex = this.isExcluded(r, true);
+        if (!ex) {
+          return {
+            signal: 'BUY', track: 4, type: '戰術動能', score: 60,
+            grade: 'T', size: cfg.INIT_T_SIZE, price: r.close
+          };
+        }
       }
     }
 
@@ -389,32 +484,34 @@ class QuantEngine {
   }
 
   // ============================================================
-  // 加碼評估（v11.0 放寬）
+  // 加碼評估
   // ============================================================
   evaluateAdd(position, r, curRet) {
     const cfg = this.config;
     const grade = position.entryGrade;
 
-    // C 級：+4%、SDV≥60、VDV≥60，加 40% 至 70%
     if (grade === 'C') {
       if (!position.added1 && curRet >= 4 && r.sdv >= 60 && r.vdv >= 60) {
-        return { stage: 1, addSize: cfg.ADD_SC_SIZE, price: r.close, reason: `早期試單確認加碼 (+${curRet.toFixed(1)}%)` };
+        return {
+          stage: 1, addSize: cfg.ADD_SC_SIZE, price: r.close,
+          reason: `早期試單確認加碼 (+${curRet.toFixed(1)}%)`
+        };
       }
       return null;
     }
 
-    // S 級：+4%、SDV≥60、VDV≥60，加 40% 至 70%
     if (grade === 'S') {
       if (!position.added1 && curRet >= 4 && r.sdv >= 60 && r.vdv >= 60) {
-        return { stage: 1, addSize: cfg.ADD_SC_SIZE, price: r.close, reason: `盤整突破確認加碼 (+${curRet.toFixed(1)}%)` };
+        return {
+          stage: 1, addSize: cfg.ADD_SC_SIZE, price: r.close,
+          reason: `盤整突破確認加碼 (+${curRet.toFixed(1)}%)`
+        };
       }
       return null;
     }
 
-    // T 級：不建議加碼
     if (grade === 'T') return null;
 
-    // A/B 級：三次加碼（v11.0 放寬：+4%、SDV≥58、VDV≥55）
     const size1 = grade === 'A' ? cfg.ADD1_SIZE_A : cfg.ADD1_SIZE_B;
     const size2 = grade === 'A' ? cfg.ADD2_SIZE_A : cfg.ADD2_SIZE_B;
 
@@ -431,7 +528,7 @@ class QuantEngine {
   }
 
   // ============================================================
-  // 出場評估（v11.0 五層：ATR停損 → 移動停利 → 訊號反轉 → 時間停損 → 戰術動能出場）
+  // 出場評估（五層）
   // ============================================================
   evaluateExit(position, r, i, df) {
     const cfg = this.config;
@@ -441,36 +538,53 @@ class QuantEngine {
 
     // ===== 第五層：戰術動能出場（T 級專用）=====
     if (position.entryGrade === 'T') {
-      // +10% 全出
-      if (curRet >= cfg.TACTICAL_TP_FULL) {
-        return { executedPrice: r.close, reason: `戰術停利 (+${curRet.toFixed(1)}%)`, highest };
-      }
-      // +5% 減半（以最終全出簡化處理，或觸發後減半）
-      if (curRet >= cfg.TACTICAL_TP_HALF && !position.tacticalHalfSold) {
-        position.tacticalHalfSold = true;
-        // 此處以「全出」簡化，實際可實作部分出場
-        return { executedPrice: r.close, reason: `戰術停利 (+${curRet.toFixed(1)}%)`, highest };
-      }
-      // -3% 或 1.5×ATR 停損
+      // 停損優先：-3% 或 1.5×ATR
       const stopPricePct = avgPrice * (1 + cfg.TACTICAL_SL_PCT / 100);
       const stopPriceAtr = avgPrice - cfg.TACTICAL_SL_ATR * r.atr;
       const stopPrice = Math.max(stopPricePct, stopPriceAtr);
       if (r.low <= stopPrice) {
-        return { executedPrice: Math.max(stopPrice, r.low), reason: `戰術停損 (-3% / 1.5×ATR)`, highest };
+        return {
+          executedPrice: Math.max(stopPrice, r.low),
+          reason: `戰術停損 (-3% / 1.5×ATR)`,
+          highest, partialRatio: 1.0
+        };
+      }
+      // +10% 全出
+      if (curRet >= cfg.TACTICAL_TP_FULL) {
+        return {
+          executedPrice: r.close,
+          reason: `戰術停利 (+${curRet.toFixed(1)}%)`,
+          highest, partialRatio: 1.0
+        };
+      }
+      // +5% 減半（僅一次）
+      if (curRet >= cfg.TACTICAL_TP_HALF && !position.tacticalHalfSold) {
+        return {
+          executedPrice: r.close,
+          reason: `戰術停利減半 (+${curRet.toFixed(1)}%)`,
+          highest, partialRatio: 0.5
+        };
       }
       // ΔSDV_1 與 ΔVDV_1 雙轉負
       if (r.d1_sdv !== null && r.d1_vdv !== null && r.d1_sdv < 0 && r.d1_vdv < 0) {
-        return { executedPrice: r.close, reason: `戰術動能轉弱 (ΔSDV₁、ΔVDV₁ 雙負)`, highest };
+        return {
+          executedPrice: r.close,
+          reason: `戰術動能轉弱 (ΔSDV₁、ΔVDV₁ 雙負)`,
+          highest, partialRatio: 1.0
+        };
       }
-      // T 級不再走其他層（避免與核心倉邏輯混淆）
-      return { executedPrice: null, reason: null, highest };
+      return { executedPrice: null, reason: null, highest, partialRatio: 0 };
     }
 
     // ===== 第 1 層：ATR 動態停損 =====
     let stopMult = r.adv < 40 ? 2.0 : r.adv < 60 ? 2.5 : 3.0;
     const stopPrice = avgPrice - stopMult * r.atr;
     if (r.low <= stopPrice) {
-      return { executedPrice: Math.max(stopPrice, r.low), reason: `破位停損 (${stopMult}×ATR)`, highest };
+      return {
+        executedPrice: Math.max(stopPrice, r.low),
+        reason: `破位停損 (${stopMult}×ATR)`,
+        highest, partialRatio: 1.0
+      };
     }
 
     // ===== 第 2 層：移動停利 =====
@@ -481,29 +595,40 @@ class QuantEngine {
     else if (curRet >= 5) trailLevel = avgPrice * 1.00;
 
     if (trailLevel !== null && r.close <= trailLevel) {
-      const reason = curRet >= 20 ? `過熱高潮 (當前+${curRet.toFixed(1)}%)` : `動能背離 (當前+${curRet.toFixed(1)}%)`;
-      return { executedPrice: r.close, reason, highest };
+      const reason = curRet >= 20
+        ? `過熱高潮 (當前+${curRet.toFixed(1)}%)`
+        : `動能背離 (當前+${curRet.toFixed(1)}%)`;
+      return { executedPrice: r.close, reason, highest, partialRatio: 1.0 };
     }
 
     // ===== 第 3 層：訊號反轉 =====
     if (i > 0) {
       const prev = df[i - 1];
-      if (prev.sdv !== null && prev.sdv >= 50 && r.sdv < 50 && r.vdv >= 60) {
-        return { executedPrice: r.close, reason: '假突破避險 (SDV跌破50)', highest };
+      if (prev.sdv !== null && prev.sdv >= 50 &&
+          r.sdv < 50 && r.vdv >= 60) {
+        return {
+          executedPrice: r.close,
+          reason: '假突破避險 (SDV跌破50)',
+          highest, partialRatio: 1.0
+        };
       }
     }
 
     // ===== 第 4 層：時間停損 =====
     const holdDays = i - position.entryIdx;
     if (holdDays >= cfg.TIME_STOP_DAYS && curRet < cfg.TIME_STOP_MIN_RET) {
-      return { executedPrice: r.close, reason: `時間停損 (${holdDays}天)`, highest };
+      return {
+        executedPrice: r.close,
+        reason: `時間停損 (${holdDays}天)`,
+        highest, partialRatio: 1.0
+      };
     }
 
-    return { executedPrice: null, reason: null, highest };
+    return { executedPrice: null, reason: null, highest, partialRatio: 0 };
   }
 
   // ============================================================
-  // 三層資金架構回測（v11.0 核心變革）
+  // 三層資金架構回測（60/25/15）
   // ============================================================
   runMultiPoolBacktest(rawCandles, initialCapital = 100000, precomputedDF = null) {
     const cfg = this.config;
@@ -515,18 +640,36 @@ class QuantEngine {
       df[i]._regularSignal = false;
       if (i >= 10 && df[i].sdv !== null) {
         const r = df[i];
-        const cond1 = r.high20 !== null && r.close >= r.high20 && r.vdv >= 60 && r.sdv >= 50 && r.sdv <= 65;
-        const cond2 = r.adv >= 35 && r.adv <= 65 && r.bdv < 55 && r.sdv >= 45 && r.sdv <= 68 && r.vdv >= 50;
-        const cond3 = r.adv >= 35 && r.adv <= 65 && r.bdv >= 40 && r.bdv <= 70 && r.sdv >= 45 && r.sdv <= 65 && r.vdv < 50;
+        const cond1 = r.high20 !== null && r.close >= r.high20 &&
+                      r.vdv >= 60 && r.sdv >= 50 && r.sdv <= 65;
+        const cond2 = r.adv >= 35 && r.adv <= 65 && r.bdv < 55 &&
+                      r.sdv >= 45 && r.sdv <= 68 && r.vdv >= 50;
+        const cond3 = r.adv >= 35 && r.adv <= 65 && r.bdv >= 40 && r.bdv <= 70 &&
+                      r.sdv >= 45 && r.sdv <= 65 && r.vdv < 50;
         if (cond1 || cond2 || cond3) df[i]._regularSignal = true;
       }
     }
 
     // ---- 三個資金池 ----
     const pools = {
-      core:     { name: '核心倉', capital: initialCapital * cfg.CORE_PCT,     position: null, cooldownUntil: -1, lossStreak: 0, trades: [], allowedTracks: [1] },
-      tactical: { name: '戰術倉', capital: initialCapital * cfg.TACTICAL_PCT, position: null, cooldownUntil: -1, lossStreak: 0, trades: [], allowedTracks: [3, 2, 4] },
-      mobile:   { name: '機動倉', capital: initialCapital * cfg.MOBILE_PCT,   position: null, cooldownUntil: -1, lossStreak: 0, trades: [], allowedTracks: [] }
+      core: {
+        name: '核心倉',
+        capital: initialCapital * cfg.CORE_PCT,
+        position: null, cooldownUntil: -1, lossStreak: 0, trades: [],
+        allowedTracks: [1], isMobile: false
+      },
+      tactical: {
+        name: '戰術倉',
+        capital: initialCapital * cfg.TACTICAL_PCT,
+        position: null, cooldownUntil: -1, lossStreak: 0, trades: [],
+        allowedTracks: [3, 2, 4], isMobile: false
+      },
+      mobile: {
+        name: '機動倉',
+        capital: initialCapital * cfg.MOBILE_PCT,
+        position: null, cooldownUntil: -1, lossStreak: 0, trades: [],
+        allowedTracks: [1], isMobile: true
+      }
     };
 
     // ---- 回測主迴圈 ----
@@ -544,33 +687,47 @@ class QuantEngine {
 
           const exitRes = this.evaluateExit(pool.position, r, i, df);
           if (exitRes.executedPrice !== null) {
-            const proceeds = pool.position.shares * exitRes.executedPrice * (1 - cfg.COMMISSION - cfg.TAX);
-            pool.capital += proceeds;
-            const retPct = (exitRes.executedPrice / pool.position.avgPrice - 1) * 100;
+            const partial = exitRes.partialRatio || 1.0;
+            const sellShares = Math.max(1, Math.floor(pool.position.shares * partial));
+            const remaining = pool.position.shares - sellShares;
 
-            pool.trades.push({
-              pool: pool.name,
-              buyDate: pool.position.buyDate,
-              buyPrice: pool.position.avgPrice,
-              buySignal: pool.position.entryType,
-              grade: pool.position.entryGrade,
-              track: pool.position.entryTrack,
-              sellDate: r.date,
-              sellPrice: exitRes.executedPrice,
-              pnlPct: Math.round(retPct * 100) / 100,
-              sellReason: exitRes.reason,
-              addCount: (pool.position.added1 ? 1 : 0) + (pool.position.added2 ? 1 : 0) + (pool.position.added3 ? 1 : 0)
-            });
+            if (sellShares > 0) {
+              const proceeds = sellShares * exitRes.executedPrice * (1 - cfg.COMMISSION - cfg.TAX);
+              pool.capital += proceeds;
+              const retPct = (exitRes.executedPrice / pool.position.avgPrice - 1) * 100;
 
-            // 冷卻期（v11.0：2/4/6）
-            if (retPct > 0) {
-              pool.lossStreak = 0;
-              pool.cooldownUntil = i + 1;
-            } else {
-              pool.lossStreak++;
-              pool.cooldownUntil = i + (pool.lossStreak >= 3 ? cfg.COOLDOWN_3 : pool.lossStreak >= 2 ? cfg.COOLDOWN_2 : cfg.COOLDOWN_1);
+              pool.trades.push({
+                pool: pool.name,
+                buyDate: pool.position.buyDate,
+                buyPrice: pool.position.avgPrice,
+                buySignal: pool.position.entryType,
+                grade: pool.position.entryGrade,
+                track: pool.position.entryTrack,
+                sellDate: r.date,
+                sellPrice: exitRes.executedPrice,
+                pnlPct: Math.round(retPct * 100) / 100,
+                sellReason: exitRes.reason,
+                addCount: (pool.position.added1 ? 1 : 0) + (pool.position.added2 ? 1 : 0) + (pool.position.added3 ? 1 : 0),
+                partial: partial < 1.0
+              });
+
+              if (partial < 1.0) {
+                pool.position.tacticalHalfSold = true;
+                pool.position.shares = remaining;
+                pool.position.totalCost = pool.position.totalCost * (remaining / (remaining + sellShares));
+              } else {
+                if (retPct > 0) {
+                  pool.lossStreak = 0;
+                  pool.cooldownUntil = i + 1;
+                } else {
+                  pool.lossStreak++;
+                  pool.cooldownUntil = i + (pool.lossStreak >= 3 ? cfg.COOLDOWN_3
+                                    : pool.lossStreak >= 2 ? cfg.COOLDOWN_2
+                                    : cfg.COOLDOWN_1);
+                }
+                pool.position = null;
+              }
             }
-            pool.position = null;
             continue;
           }
 
@@ -601,7 +758,7 @@ class QuantEngine {
         if (!r.ma20) continue;
         if (pool.allowedTracks.length === 0) continue;
 
-        const entryRes = this.evaluateEntrySignal(df, i, pool.allowedTracks);
+        const entryRes = this.evaluateEntrySignal(df, i, pool.allowedTracks, pool.isMobile);
         if (entryRes.signal === 'BUY') {
           const shares = Math.floor((pool.capital * entryRes.size) / entryRes.price);
           if (shares > 0) {
@@ -639,15 +796,16 @@ class QuantEngine {
       const poolTotal = pool.capital + posValue;
       finalValue += poolTotal;
       allTrades.push(...pool.trades);
+
+      const initAmt = initialCapital * (key === 'core' ? cfg.CORE_PCT : key === 'tactical' ? cfg.TACTICAL_PCT : cfg.MOBILE_PCT);
       poolSummary[pool.name] = {
-        initial: Math.round(initialCapital * (key === 'core' ? cfg.CORE_PCT : key === 'tactical' ? cfg.TACTICAL_PCT : cfg.MOBILE_PCT)),
+        initial: Math.round(initAmt),
         final: Math.round(poolTotal),
-        returnPct: Math.round((poolTotal / (initialCapital * (key === 'core' ? cfg.CORE_PCT : key === 'tactical' ? cfg.TACTICAL_PCT : cfg.MOBILE_PCT)) - 1) * 1000) / 10,
+        returnPct: Math.round((poolTotal / initAmt - 1) * 1000) / 10,
         tradeCount: pool.trades.length
       };
     }
 
-    // 依日期排序所有交易
     allTrades.sort((a, b) => new Date(a.buyDate) - new Date(b.buyDate));
 
     const totalReturnPct = (finalValue / initialCapital - 1) * 100;
@@ -665,7 +823,7 @@ class QuantEngine {
     };
   }
 
-  // 保留原方法名稱相容（內部呼叫多池版）
+  // 相容舊方法名稱
   runFullCompoundBacktest(rawCandles, initialCapital = 100000, precomputedDF = null) {
     return this.runMultiPoolBacktest(rawCandles, initialCapital, precomputedDF);
   }
