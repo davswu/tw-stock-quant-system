@@ -1,15 +1,18 @@
 /**
- * main.js - 四指標趨勢分析 UI 控制器 (v11.0.1 修正版)
+ * main.js - 四指標趨勢分析 UI 控制器 (v11.0.2 修正版)
  * 完整對齊《四指標趨勢分析說明文案 v11.0》與 quantEngine.js v11.0.1
  * 資金配置：核心 60% / 戰術 25% / 機動 15%
  * 
- * ========== 修正記錄 (v11.0.1) ==========
- * - 極致超跌訊號顯示「核心倉 / 機動倉」雙資金池
- * - 使用 ?? 運算子避免 0 值誤判
- * - normalizeCandleData 使用 ?? 而非 ||
+ * ========== 修正記錄 (v11.0.2) ==========
+ * - 新增「近 1 年（365 天）過濾」，確保回測區間符合標題
+ * - 保留 v11.0.1 修正：極致超跌雙資金池標示、?? 運算子
  */
 
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbyP4to4WeWt17kngG-5UpKIMPz3Mp3tKfzVt6mNBfOQkEuyGQK0rUNxyJHz1jo2_8Iz/exec";
+
+// v11.0.2：近 1 年過濾開關（設為 true 則只保留近 365 天資料）
+const ENABLE_ONE_YEAR_FILTER = true;
+const ONE_YEAR_DAYS = 365;
 
 const engine = new QuantEngine();
 
@@ -46,7 +49,18 @@ async function analyzeStock() {
       throw new Error(`查無股票代碼 [${stockCode}] 之有效 K 線數據`);
     }
 
-    const candles = normalizeCandleData(rawCandles);
+    let candles = normalizeCandleData(rawCandles);
+
+    // v11.0.2：近 1 年過濾
+    if (ENABLE_ONE_YEAR_FILTER && candles.length > 0) {
+      const lastDate = new Date(candles[candles.length - 1].date);
+      const cutoffDate = new Date(lastDate);
+      cutoffDate.setDate(cutoffDate.getDate() - ONE_YEAR_DAYS);
+      candles = candles.filter(c => {
+        const d = new Date(c.date);
+        return d >= cutoffDate;
+      });
+    }
 
     if (candles.length < 48) {
       throw new Error(`數據長度僅 ${candles.length} 天，不足 48 天指標暖機門檻`);
@@ -366,7 +380,7 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
     return;
   }
 
-  // ===== 加權總報酬顯示（v11.0.1：使用 ?? 運算子）=====
+  // ===== 加權總報酬顯示（v11.0.1：使用 ?? 運算子；v11.0.2：60/25/15）=====
   if (summaryEl && backtestResult) {
     const wins = trades.filter(t => t.pnlPct > 0).length;
     const winRate = Math.round((wins / trades.length) * 100);
@@ -376,6 +390,7 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
     const tacRet = p['戰術倉']?.returnPct ?? 0;
     const mobRet = p['機動倉']?.returnPct ?? 0;
 
+    // v11.0.2：加權總報酬權重改為 60/25/15
     const weighted = coreRet * 0.60 + tacRet * 0.25 + mobRet * 0.15;
 
     summaryEl.innerHTML = `
