@@ -288,7 +288,7 @@ function renderDeltaMatrix(candles) {
       <tr class="hover:bg-slate-800/50 transition border-b border-slate-700/30">
         <td class="p-3 text-left font-sans text-slate-200">${ind.name}</td>
         <td class="p-3 text-white font-bold">${current !== null ? Math.round(current) : '--'}</td>
-        <td class="p-3">${formatD delta(d1)}</td>
+        <td class="p-3">${formatDelta(d1)}</td>
         <td class="p-3">${formatDelta(d5)}</td>
         <td class="p-3">${formatDelta(d10)}</td>
       </tr>
