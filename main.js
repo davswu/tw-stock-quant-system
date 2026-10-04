@@ -1,9 +1,6 @@
 /**
- * main.js - 四指標趨勢分析 UI 控制器 (v11.0.3 修正版)
- * 
- * ========== 修正記錄 (v11.0.3) ==========
- * - 歷史交易記錄排序改為「升序（由遠至近）」，同日期依資金池排序
- * - 保留 v11.0.2 修正：近 1 年過濾、極致超跌雙資金池標示、?? 運算子
+ * main.js - 四指標趨勢分析 UI 控制器 (v11.1.0 通用版)
+ * 三倉按「訊號來源」分工，所有股票通用
  */
 
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbyP4to4WeWt17kngG-5UpKIMPz3Mp3tKfzVt6mNBfOQkEuyGQK0rUNxyJHz1jo2_8Iz/exec";
@@ -131,21 +128,27 @@ function renderSignalBadge(candles) {
     return;
   }
 
-  const decision = engine.evaluateEntrySignal(candles, idx, [1, 3, 2, 4], false);
+  // 依序檢查三倉：核心 → 戰術 → 機動
+  const coreDecision = engine.evaluateEntrySignal(candles, idx, 'core');
+  const tacDecision = engine.evaluateEntrySignal(candles, idx, 'tactical');
+  const mobDecision = engine.evaluateEntrySignal(candles, idx, 'mobile');
 
-  if (decision.signal === 'BUY') {
+  let decision = null;
+  let poolName = '';
+  if (coreDecision.signal === 'BUY') { decision = coreDecision; poolName = '核心倉'; }
+  else if (tacDecision.signal === 'BUY') { decision = tacDecision; poolName = '戰術倉'; }
+  else if (mobDecision.signal === 'BUY') { decision = mobDecision; poolName = '機動倉'; }
+
+  if (decision) {
     const gradeStyles = {
-      'A': { bg: 'bg-emerald-500/20', text: 'text-emerald-400', border: 'border-emerald-500/40', icon: '🚀', label: '強勢主攻', pool: '核心倉' },
-      'B': { bg: 'bg-sky-500/20', text: 'text-sky-400', border: 'border-sky-500/40', icon: '📈', label: '標準進場', pool: '核心倉' },
-      'S': { bg: 'bg-purple-500/20', text: 'text-purple-400', border: 'border-purple-500/40', icon: '⚡', label: '盤整突破', pool: '戰術倉' },
-      'C': { bg: 'bg-amber-500/20', text: 'text-amber-400', border: 'border-amber-500/40', icon: '🎯', label: '早期試單', pool: '戰術倉' },
-      'T': { bg: 'bg-rose-500/20', text: 'text-rose-400', border: 'border-rose-500/40', icon: '⚔️', label: '戰術動能', pool: '戰術倉' }
+      'A': { bg: 'bg-emerald-500/20', text: 'text-emerald-400', border: 'border-emerald-500/40', icon: '🚀', label: '強勢主攻' },
+      'B': { bg: 'bg-sky-500/20', text: 'text-sky-400', border: 'border-sky-500/40', icon: '📈', label: '標準進場' },
+      'S': { bg: 'bg-purple-500/20', text: 'text-purple-400', border: 'border-purple-500/40', icon: '⚡', label: '盤整突破' },
+      'C': { bg: 'bg-amber-500/20', text: 'text-amber-400', border: 'border-amber-500/40', icon: '🎯', label: '早期試單' },
+      'T': { bg: 'bg-rose-500/20', text: 'text-rose-400', border: 'border-rose-500/40', icon: '⚔️', label: '戰術動能' }
     };
     const style = gradeStyles[decision.grade] || gradeStyles['B'];
     const sizePct = Math.round(decision.size * 100);
-
-    const isExtreme = decision.type === '極致超跌';
-    const poolLabel = isExtreme ? '核心倉 / 機動倉' : style.pool;
 
     elBadge.className = `inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm ${style.bg} ${style.text} ${style.border} border text-center`;
     elBadge.textContent = `${style.icon} ${decision.grade}級 ${decision.type} (${decision.score}分)`;
@@ -153,7 +156,7 @@ function renderSignalBadge(candles) {
     elDesc.className = "text-sm text-slate-300 mt-3 leading-relaxed";
     elDesc.innerHTML = `
       <span class="inline-block px-2 py-0.5 rounded bg-slate-700 text-slate-300 text-xs font-bold">軌道 ${decision.track}</span>
-      <span class="inline-block ml-1 px-2 py-0.5 rounded bg-rose-900 text-rose-300 text-xs font-bold">${poolLabel}</span>
+      <span class="inline-block ml-1 px-2 py-0.5 rounded bg-rose-900 text-rose-300 text-xs font-bold">${poolName}</span>
       <span class="ml-1">${style.label}</span> · 
       建議倉位 <strong class="${style.text}">${sizePct}%</strong> · 
       進場價 <strong class="font-mono">$${decision.price.toFixed(2)}</strong>
@@ -175,7 +178,7 @@ function renderSignalBadge(candles) {
   elBadge.textContent = `${state.icon} ${state.name} · 無訊號`;
 
   elDesc.className = "text-sm text-slate-400 mt-3 leading-relaxed";
-  elDesc.textContent = `當前 SDV ${Math.round(sdv)}，系統持續監控四軌訊號中。`;
+  elDesc.textContent = `當前 SDV ${Math.round(sdv)}，系統持續監控三倉訊號中。`;
 }
 
 function renderTScoreCards(candles) {
@@ -236,9 +239,8 @@ function renderAdvRiskHub(candles) {
   }
 
   let stopMult;
-  if (last.adv < 40) stopMult = 1.5;
-  else if (last.adv < 60) stopMult = 2.0;
-  else if (last.adv < 70) stopMult = 2.5;
+  if (last.adv < 40) stopMult = 2.0;
+  else if (last.adv < 60) stopMult = 2.5;
   else stopMult = 3.0;
 
   const stopPrice = last.close - stopMult * last.atr;
@@ -258,7 +260,7 @@ function renderAdvRiskHub(candles) {
   }
 
   ruleEl.innerHTML = `
-    <span class="text-slate-400">ATR 停損倍數：</span>
+    <span class="text-slate-400">核心倉 ATR 停損倍數：</span>
     <strong class="text-amber-300">${stopMult}× ATR</strong> · 
     停損價 <strong class="font-mono text-slate-200">$${stopPrice.toFixed(2)}</strong>
   `;
@@ -347,7 +349,6 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
     return;
   }
 
-  // 加權總報酬顯示（60/25/15）
   if (summaryEl && backtestResult) {
     const wins = trades.filter(t => t.pnlPct > 0).length;
     const winRate = Math.round((wins / trades.length) * 100);
@@ -368,7 +369,6 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
     `;
   }
 
-  // v11.0.3：交易記錄已於 quantEngine 內部排序（升序：由遠至近）
   trades.forEach(t => {
     const row = document.createElement('tr');
     row.className = 'border-b border-slate-700/40 hover:bg-slate-800/60 transition';
