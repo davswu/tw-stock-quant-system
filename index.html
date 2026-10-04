@@ -1,169 +1,387 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>台股實時四指標與系統決策矩陣 (v10.8)</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>四指標趨勢分析與系統決策矩陣 (v11.0 日線級高頻高報酬版)</title>
+<script>
+MathJax = { tex: { inlineMath: [['$','$'],['\\(','\\)']], displayMath: [['$$','$$'],['\\[','\\]']] } };
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+<style>
+body{font-family:'Helvetica Neue',Arial,'PingFang TC','Microsoft JhengHei',sans-serif;line-height:1.6;color:#333;max-width:1280px;margin:0 auto;padding:20px;background:#f9fbfd;}
+header{text-align:center;margin-bottom:40px;padding-bottom:20px;border-bottom:2px solid #004080;}
+h1{color:#004080;font-size:2.1em;}
+.meta-info{font-size:.9em;color:#666;background:#e6f0fa;padding:10px;border-radius:5px;display:inline-block;}
+.version-badge{display:inline-block;background:linear-gradient(135deg,#e74c3c,#c0392b);color:#fff;padding:4px 12px;border-radius:20px;font-size:.85em;font-weight:bold;margin-left:8px;box-shadow:0 2px 4px rgba(231,76,60,.3);}
+h2{color:#0059b3;border-left:5px solid #0059b3;padding-left:10px;margin-top:40px;}
+h3{color:#333;margin-top:25px;}
+.formula-box{background:#fff;border:1px solid #ddd;padding:15px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,.05);margin:20px 0;text-align:center;font-size:1.1em;}
+.desc-list{background:#fff;padding:15px 30px;border-radius:8px;border:1px solid #ddd;}
+table{width:100%;border-collapse:collapse;margin:20px 0;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.05);}
+th,td{border:1px solid #ddd;padding:10px;text-align:left;}
+th{background:#004080;color:#fff;font-weight:bold;text-align:center;}
+td{text-align:center;}
+tr:nth-child(even){background:#f8f9fa;}
+tr:hover{background:#e6f0fa;}
+.highlight-red{color:#d9534f;font-weight:bold;}
+.highlight-green{color:#5cb85c;font-weight:bold;}
+.highlight-orange{color:#f39c12;font-weight:bold;}
+.highlight-purple{color:#8e44ad;font-weight:bold;}
+.appendix{background:#2c3e50;color:#fff;padding:25px;border-radius:8px;margin-top:50px;}
+.appendix h2{color:#18bc9c;border-left-color:#18bc9c;}
+.appendix h3{color:#18bc9c;}
+.appendix table{color:#333;font-size:.9em;}
+.appendix th{background:#18bc9c;color:#fff;}
+.appendix td{text-align:center;vertical-align:middle;}
+.rules-card{background:#34495e;border-left:4px solid #18bc9c;padding:15px 20px;margin-bottom:25px;border-radius:0 8px 8px 0;color:#ecf0f1;}
+.rules-card h4{margin-top:0;color:#18bc9c;font-size:1.1em;margin-bottom:8px;}
+.rules-card ul{margin:5px 0 15px 20px;padding:0;}
+.rowspan-label{font-weight:bold;background:#eef9f7;color:#2c3e50;}
+.cell-subtext{font-size:.85em;color:#555;text-align:left;line-height:1.4;}
+.note-box{background:#1a252f;border-left:4px solid #f39c12;padding:15px 20px;margin:20px 0;border-radius:0 8px 8px 0;color:#ecf0f1;font-size:.95em;}
+.note-box h4{margin-top:0;color:#f39c12;font-size:1.05em;margin-bottom:8px;}
+.note-box ul{margin:5px 0 5px 20px;padding:0;}
+.note-box li{margin-bottom:6px;}
+.danger-box{background:#2c1319;border-left:4px solid #e74c3c;padding:15px 20px;margin:20px 0;border-radius:0 8px 8px 0;color:#ecf0f1;font-size:.95em;}
+.danger-box h4{margin-top:0;color:#e74c3c;font-size:1.05em;margin-bottom:8px;}
+.success-box{background:#13261a;border-left:4px solid #27ae60;padding:15px 20px;margin:20px 0;border-radius:0 8px 8px 0;color:#ecf0f1;font-size:.95em;}
+.success-box h4{margin-top:0;color:#27ae60;font-size:1.05em;margin-bottom:8px;}
+.new-badge{display:inline-block;background:#e74c3c;color:#fff;font-size:.7em;padding:2px 6px;border-radius:4px;margin-left:8px;vertical-align:middle;animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+.track-badge{display:inline-block;font-size:.75em;font-weight:bold;padding:3px 10px;border-radius:4px;margin-right:6px;}
+.track-1{background:#3498db;color:#fff;}
+.track-2{background:#f39c12;color:#fff;}
+.track-3{background:#8e44ad;color:#fff;}
+.track-4{background:#e74c3c;color:#fff;}
+.grade-A{background:#27ae60;color:#fff;font-weight:bold;padding:3px 10px;border-radius:4px;}
+.grade-B{background:#3498db;color:#fff;font-weight:bold;padding:3px 10px;border-radius:4px;}
+.grade-C{background:#f39c12;color:#fff;font-weight:bold;padding:3px 10px;border-radius:4px;}
+.grade-S{background:#8e44ad;color:#fff;font-weight:bold;padding:3px 10px;border-radius:4px;}
+.grade-T{background:#e74c3c;color:#fff;font-weight:bold;padding:3px 10px;border-radius:4px;}
+.layer-badge{display:inline-block;font-size:.75em;font-weight:bold;padding:3px 8px;border-radius:4px;color:#fff;}
+.layer-1{background:#c0392b;}.layer-2{background:#27ae60;}.layer-3{background:#2980b9;}.layer-4{background:#7f8c8d;}.layer-5{background:#e74c3c;}
+.pool-card{display:inline-block;background:#fff;border:2px solid #004080;border-radius:8px;padding:15px 25px;margin:10px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.1);}
+.pool-card .pool-title{font-weight:bold;color:#004080;font-size:1.1em;}
+.pool-card .pool-pct{font-size:1.6em;font-weight:bold;color:#e74c3c;}
+.pool-card .pool-desc{font-size:.85em;color:#666;}
+</style>
 </head>
-<body class="bg-slate-900 text-slate-100 min-h-screen p-4 md:p-8">
+<body>
+<header>
+<h1>四指標趨勢分析說明文案 <span class="version-badge">v11.0 日線級高頻高報酬版</span></h1>
+<p>股價偏差值 (SDV)、成交量偏差值 (VDV)、ATR波動偏差值 (ADV)、帶寬偏差值 (BDV)</p>
+<div class="meta-info">
+<strong>撰寫單位：</strong>金融分析團隊（教授、投顧經理人、經紀人、資深分析師） | <strong>日期：</strong>2026年10月
+</div>
+</header>
 
-    <div class="max-w-7xl mx-auto space-y-6">
+<main>
+<!-- 資金架構 -->
+<section>
+<h2>零、三層資金架構（v11.0 核心變革）</h2>
+<div style="text-align:center;">
+<div class="pool-card"><div class="pool-title">核心倉</div><div class="pool-pct">60%</div><div class="pool-desc">軌 1：A/B 級<br>抓大波段</div></div>
+<div class="pool-card"><div class="pool-title">戰術倉</div><div class="pool-pct">30%</div><div class="pool-desc">軌 3/軌 2/軌 4<br>提高交易次數</div></div>
+<div class="pool-card"><div class="pool-title">機動倉</div><div class="pool-pct">10%</div><div class="pool-desc">突發機會<br>嚴格停損</div></div>
+</div>
+<div class="note-box">
+<h4>【資金規則】</h4>
+<ul>
+<li>核心倉 + 戰術倉 + 機動倉 = 總資金 100%，不得超額。</li>
+<li>單筆風險 ≤ 總資金 2%。</li>
+<li>戰術倉與機動倉獨立停損，不影響核心倉。</li>
+<li>高頻交易成本來回約 0.585%，單筆預期報酬須 &gt; 1.5%。</li>
+</ul>
+</div>
+</section>
 
-        <!-- Header & 搜尋欄 -->
-        <header class="flex flex-col md:flex-row justify-between items-center bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg gap-4">
-            <div>
-                <h1 class="text-2xl font-bold text-sky-400">台股實時四指標與系統決策矩陣 <span class="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded">v10.8</span></h1>
-                <p class="text-sm text-slate-400 mt-1">對數標準化 T-Score + Δ動能 + 三軌進場 + 四層出場 + 三次加碼 + 12個月歷史追蹤</p>
-            </div>
+<!-- 模組一：SDV -->
+<section>
+<h2>一、股價偏差值 (Stock Price Deviation Value, SDV)</h2>
+<div class="formula-box">$$SDV = 10 \times \left(\frac{\ln(p) - \mu_{\ln(p)}}{\sigma_{\ln(p)}}\right) + 50$$</div>
+<ul class="desc-list">
+<li>$\ln(p)$：當日股價對數</li>
+<li>$\mu_{\ln(p)}$：過去 $n$ 日股價對數平均數</li>
+<li>$\sigma_{\ln(p)}$：過去 $n$ 日股價對數標準差 ($n=30$)</li>
+<li><strong>指標說明：</strong>SDV 衡量股價相對強弱與乖離程度。</li>
+<li><strong>v11.0 新增：</strong>戰術訊號可用區間 <strong>SDV 45~68</strong>（中性偏多至多頭強勢，避免極端追高）。</li>
+</ul>
+<h3>【SDV 數值位階矩陣與趨勢定義】</h3>
+<table>
+<thead><tr><th width="18%">SDV 區間</th><th>趨勢定義與市場意義</th><th width="22%">v11.0 戰術可用</th></tr></thead>
+<tbody>
+<tr><td>$SDV \ge 70$</td><td style="text-align:left;">極致超買/強勢主攻區：留意過熱拉回或賣點反轉。</td><td>排除（E1）</td></tr>
+<tr><td>$60 \le SDV < 70$</td><td style="text-align:left;">多頭強勢/趨勢延伸：多頭主導，穩健推升。</td><td>可用</td></tr>
+<tr><td>$50 \le SDV < 60$</td><td style="text-align:left;">中性偏多/溫和多頭：多頭控盤震盪/整理區。</td><td>可用</td></tr>
+<tr><td>$45 \le SDV < 50$</td><td style="text-align:left;">中性偏多下緣：多方初步承接。</td><td>戰術可用</td></tr>
+<tr><td>$40 \le SDV < 45$</td><td style="text-align:left;">中性偏空/溫和空頭：空頭控盤震盪/整理區。</td><td>觀察</td></tr>
+<tr><td>$30 \le SDV < 40$</td><td style="text-align:left;">空頭強勢/趨勢下尋。</td><td>核心超跌觀察</td></tr>
+<tr><td>$SDV < 30$</td><td style="text-align:left;">極致超賣/恐慌主跌區：留意抄底。</td><td>極致超跌 A 級</td></tr>
+</tbody>
+</table>
+<h3>$\Delta SDV_N$ 動能矩陣區間與市場意義</h3>
+<p>$\Delta SDV_N = SDV_t - SDV_{t-N}$</p>
+<table>
+<thead><tr><th width="14%">$\Delta SDV$ 區間</th><th>$\Delta SDV_1$ (1日)</th><th>$\Delta SDV_5$ (5日)</th><th>$\Delta SDV_{10}$ (10日)</th><th width="14%">v11.0 戰術觸發</th></tr></thead>
+<tbody>
+<tr><td>$\ge +10$</td><td style="text-align:left;"><span class="highlight-red">極端強勢衝擊</span></td><td style="text-align:left;"><span class="highlight-red">短線極端強勢推進</span></td><td style="text-align:left;"><span class="highlight-red">中線多頭結構確認</span></td><td><span class="highlight-red">戰術可觸發</span></td></tr>
+<tr><td>$+3 \sim <+10$</td><td style="text-align:left;">溫和多頭推升</td><td style="text-align:left;">短線溫和多頭推升</td><td style="text-align:left;">中線穩健多頭成形</td><td><span class="highlight-green">戰術觸發區</span></td></tr>
+<tr><td>$-3 \sim <+3$</td><td style="text-align:left;">盤整觀望期</td><td style="text-align:left;">短線盤整觀望期</td><td style="text-align:left;">中線結構膠著期</td><td>不觸發</td></tr>
+<tr><td>$-10 \sim \le -3$</td><td style="text-align:left;">溫和回檔修正</td><td style="text-align:left;">短線溫和回檔修正</td><td style="text-align:left;">中線結構鬆動回檔</td><td>不觸發</td></tr>
+<tr><td>$\le -10$</td><td style="text-align:left;"><span class="highlight-green">極端弱勢衝擊</span></td><td style="text-align:left;"><span class="highlight-green">短線極端弱勢下殺</span></td><td style="text-align:left;"><span class="highlight-green">中線空頭結構確認</span></td><td>反向觀察</td></tr>
+</tbody>
+</table>
+</section>
 
-            <div class="flex items-center space-x-2 w-full md:w-auto">
-                <input type="text" id="stockInput" value="2330" placeholder="輸入台股代碼"
-                       class="bg-slate-900 border border-slate-600 px-4 py-2 rounded-lg text-white font-mono focus:outline-none focus:border-sky-500 w-full md:w-48">
-                <button onclick="analyzeStock()"
-                        class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded-lg font-bold transition text-white whitespace-nowrap">
-                    實時分析
-                </button>
-            </div>
-        </header>
+<!-- 模組二：VDV -->
+<section>
+<h2>二、成交量偏差值 (Trading Volume Deviation Value, VDV)</h2>
+<div class="formula-box">$$VDV = 10 \times \left(\frac{\ln(v) - \mu_{\ln(v)}}{\sigma_{\ln(v)}}\right) + 50$$</div>
+<p><strong>指標說明：</strong>VDV 衡量量能動能與資金進出強度。</p>
+<h3>【VDV 數值位階矩陣與趨勢定義】</h3>
+<table>
+<thead><tr><th width="18%">VDV 區間</th><th>趨勢定義與市場意義</th><th width="22%">v11.0 戰術可用</th></tr></thead>
+<tbody>
+<tr><td>$VDV \ge 70$</td><td style="text-align:left;">極致爆量/天量換手：真突破或高位派發。</td><td>核心賣出觀察</td></tr>
+<tr><td>$60 \le VDV < 70$</td><td style="text-align:left;">顯著放量/資金積極。</td><td>可用</td></tr>
+<tr><td>$50 \le VDV < 60$</td><td style="text-align:left;">常態量能/資金中性。</td><td><span class="highlight-green">戰術觸發區</span></td></tr>
+<tr><td>$40 \le VDV < 50$</td><td style="text-align:left;">量能微縮/資金觀望。</td><td>觀察</td></tr>
+<tr><td>$0 \le VDV < 40$</td><td style="text-align:left;">低迷量能/顯著縮量：驗證「拉回無量」。</td><td>核心拉回可用</td></tr>
+<tr><td>$VDV < 30$</td><td style="text-align:left;">極致窒息量/量能冰點。</td><td>觀察</td></tr>
+</tbody>
+</table>
+<h3>$\Delta VDV_N$ 動能矩陣區間與市場意義</h3>
+<table>
+<thead><tr><th width="14%">$\Delta VDV$ 區間</th><th>$\Delta VDV_1$ (1日)</th><th>$\Delta VDV_5$ (5日)</th><th>$\Delta VDV_{10}$ (10日)</th><th width="14%">v11.0 戰術觸發</th></tr></thead>
+<tbody>
+<tr><td>$\ge +10$</td><td style="text-align:left;">單日極端爆量突襲</td><td style="text-align:left;">短線資金強勢潮汐</td><td style="text-align:left;">中線大軍全面進駐</td><td><span class="highlight-red">戰術可觸發</span></td></tr>
+<tr><td>$+3 \sim <+10$</td><td style="text-align:left;">單日溫和放量增溫</td><td style="text-align:left;">短線資金健康輪動</td><td style="text-align:left;">中線資金穩健推升</td><td><span class="highlight-green">戰術觸發區</span></td></tr>
+<tr><td>$-3 \sim <+3$</td><td style="text-align:left;">單日常態量能維持</td><td style="text-align:left;">短線資金進出平衡</td><td style="text-align:left;">中線資金動能停滯</td><td>不觸發</td></tr>
+<tr><td>$-10 \sim \le -3$</td><td style="text-align:left;">單日溫和量縮觀望</td><td style="text-align:left;">短線資金緩步退潮</td><td style="text-align:left;">中線資金慢性失血</td><td>不觸發</td></tr>
+<tr><td>$\le -10$</td><td style="text-align:left;">單日量能極致冰點</td><td style="text-align:left;">短線資金徹底枯竭</td><td style="text-align:left;">中線資金結構瓦解</td><td>反向觀察</td></tr>
+</tbody>
+</table>
+</section>
 
-        <!-- 4-Card 佈局區 -->
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
-                <div>
-                    <div id="stockTitle" class="flex flex-col">
-                        <span class="text-2xl font-extrabold text-white">--</span>
-                        <span class="text-sm text-slate-300 font-normal mt-1">--</span>
-                    </div>
-                </div>
-                <p id="decisionDesc" class="text-sm text-slate-400 mt-3 leading-relaxed">正在讀取量化引擎數據...</p>
-            </div>
+<!-- 模組三：ADV -->
+<section>
+<h2>三、ATR波動偏差值 (ATR Deviation Value, ADV)</h2>
+<div class="formula-box">$$ADV = 10 \times \left(\frac{\ln(a) - \mu_{\ln(a)}}{\sigma_{\ln(a)}}\right) + 50$$</div>
+<h3>【ADV 數值位階矩陣與趨勢定義】</h3>
+<table>
+<thead><tr><th width="18%">ADV 區間</th><th>趨勢定義與市場意義</th><th width="22%">v11.0 戰術可用</th></tr></thead>
+<tbody>
+<tr><td>$ADV \ge 70$</td><td style="text-align:left;">極致劇烈/高風險暴甩：洗盤與滑價風險極高。</td><td>排除（E5）</td></tr>
+<tr><td>$60 \le ADV < 70$</td><td style="text-align:left;">波動擴大/風險升溫：停損空間需放大。</td><td>核心可用，戰術減半</td></tr>
+<tr><td>$50 \le ADV < 60$</td><td style="text-align:left;">中度波動/風險適性。</td><td>可用</td></tr>
+<tr><td>$35 \le ADV < 50$</td><td style="text-align:left;">波動收斂/風險偏低。</td><td><span class="highlight-green">戰術觸發區</span></td></tr>
+<tr><td>$30 \le ADV < 35$</td><td style="text-align:left;">低度波動/市場沉寂。</td><td>觀察</td></tr>
+<tr><td>$ADV < 30$</td><td style="text-align:left;">極致平靜/波動死寂。</td><td>排除</td></tr>
+</tbody>
+</table>
+<h3>$\Delta ADV_N$ 動能矩陣區間與市場意義</h3>
+<table>
+<thead><tr><th width="14%">$\Delta ADV$ 區間</th><th>$\Delta ADV_1$ (1日)</th><th>$\Delta ADV_5$ (5日)</th><th>$\Delta ADV_{10}$ (10日)</th><th width="14%">v11.0 戰術觸發</th></tr></thead>
+<tbody>
+<tr><td>$\ge +10$</td><td style="text-align:left;">單日風險極度飆升</td><td style="text-align:left;">短線環境風險暴增</td><td style="text-align:left;">中線進入高危險區</td><td>排除</td></tr>
+<tr><td>$+3 \sim <+10$</td><td style="text-align:left;">單日波動溫和擴大</td><td style="text-align:left;">短線波動漸增活躍</td><td style="text-align:left;">中線波動結構放大</td><td>可用（減半）</td></tr>
+<tr><td>$-3 \sim <+3$</td><td style="text-align:left;">單日風險適性常態</td><td style="text-align:left;">短線風險穩定可控</td><td style="text-align:left;">中線風險中性平穩</td><td><span class="highlight-green">戰術觸發區</span></td></tr>
+<tr><td>$-10 \sim \le -3$</td><td style="text-align:left;">單日波動溫和收斂</td><td style="text-align:left;">短線環境漸趨沉寂</td><td style="text-align:left;">中線波動慢性收斂</td><td><span class="highlight-green">戰術觸發區</span></td></tr>
+<tr><td>$\le -10$</td><td style="text-align:left;">單日波動極致壓縮</td><td style="text-align:left;">短線波動徹底死寂</td><td style="text-align:left;">中線休眠與蟄伏期</td><td>Squeeze 觀察</td></tr>
+</tbody>
+</table>
+</section>
 
-            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
-                <div id="priceLabel" class="text-sm font-bold text-slate-400 mb-1">即時股價 (T / T-1)</div>
-                <div id="stockPrice" class="text-2xl md:text-3xl font-extrabold font-mono text-emerald-400">NT$ --</div>
-            </div>
+<!-- 模組四：BDV -->
+<section>
+<h2>四、帶寬偏差值 (Bollinger Bands Width Deviation Value, BDV)</h2>
+<div class="formula-box">$$BDV = 10 \times \left(\frac{\ln(b) - \mu_{\ln(b)}}{\sigma_{\ln(b)}}\right) + 50$$</div>
+<h3>【BDV 數值位階矩陣與趨勢定義】</h3>
+<table>
+<thead><tr><th width="18%">BDV 區間</th><th>趨勢定義與市場意義</th><th width="22%">v11.0 戰術可用</th></tr></thead>
+<tbody>
+<tr><td>$BDV \ge 70$</td><td style="text-align:left;">極致擴張/通道張裂頂點：謹防趨勢衰竭。</td><td>排除（E4）</td></tr>
+<tr><td>$60 \le BDV < 70$</td><td style="text-align:left;">通道擴張/主升(跌)段釋放。</td><td>核心可用，戰術減半</td></tr>
+<tr><td>$50 \le BDV < 60$</td><td style="text-align:left;">中軸運作/態勢緩和。</td><td>可用</td></tr>
+<tr><td>$40 \le BDV < 50$</td><td style="text-align:left;">通道收縮/進入區間盤整。</td><td><span class="highlight-green">戰術觸發區</span></td></tr>
+<tr><td>$30 \le BDV < 40$</td><td style="text-align:left;">高度擠壓/蓄勢待發。</td><td>Squeeze S 級</td></tr>
+<tr><td>$BDV < 30$</td><td style="text-align:left;">極致收縮/變盤極致臨界點。</td><td>Squeeze S 級</td></tr>
+</tbody>
+</table>
+<h3>$\Delta BDV_N$ 動能矩陣區間與市場意義</h3>
+<table>
+<thead><tr><th width="14%">$\Delta BDV$ 區間</th><th>$\Delta BDV_1$ (1日)</th><th>$\Delta BDV_5$ (5日)</th><th>$\Delta BDV_{10}$ (10日)</th><th width="14%">v11.0 戰術觸發</th></tr></thead>
+<tbody>
+<tr><td>$\ge +10$</td><td style="text-align:left;">單日通道極致張裂</td><td style="text-align:left;">短線趨勢強烈爆發</td><td style="text-align:left;">中線趨勢極致高潮</td><td>排除</td></tr>
+<tr><td>$+3 \sim <+10$</td><td style="text-align:left;">單日通道擴張展開</td><td style="text-align:left;">短線框架穩健擴大</td><td style="text-align:left;">中線波段順暢展開</td><td><span class="highlight-green">戰術觸發區</span></td></tr>
+<tr><td>$-3 \sim <+3$</td><td style="text-align:left;">單日通道態勢緩和</td><td style="text-align:left;">短線框架停滯區間</td><td style="text-align:left;">中線大區間常態期</td><td>可用</td></tr>
+<tr><td>$-10 \sim \le -3$</td><td style="text-align:left;">單日通道顯著收縮</td><td style="text-align:left;">短線通道高度擠壓</td><td style="text-align:left;">中線波段進入休整</td><td>Squeeze 觀察</td></tr>
+<tr><td>$\le -10$</td><td style="text-align:left;">單日變盤極致臨界</td><td style="text-align:left;">短線極致收斂末端</td><td style="text-align:left;">中線變盤超級臨界</td><td>Squeeze S 級</td></tr>
+</tbody>
+</table>
+</section>
 
-            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
-                <div id="volumeLabel" class="text-sm font-bold text-slate-400 mb-1">即時成交量 (T / T-1)</div>
-                <div id="stockVolume" class="text-2xl md:text-3xl font-extrabold font-mono text-sky-400">-- 張</div>
-            </div>
+<!-- 附錄 -->
+<section class="appendix">
+<h2>五、【附錄】系統決策速查矩陣 (v11.0)</h2>
+<div class="rules-card">
+<h4>【指標說明】</h4>
+<ul>
+<li><strong>SDV：</strong>價格位置（多空趨勢核心）</li>
+<li><strong>VDV：</strong>量能真偽（資金強度確認）</li>
+<li><strong>ADV：</strong>波動強度（風險大小）</li>
+<li><strong>BDV：</strong>波動週期（突破/盤整/尾端）</li>
+</ul>
+<h4>【共振規則】</h4>
+<p style="margin-bottom:5px;"><strong>ADV + BDV 共振 － 市場狀態與風險環境</strong>（BDV 決定框架，ADV 決定脾氣）</p>
+<p><strong>SDV + VDV 共振 － 多空方向與進出場依據</strong>（SDV 決定位階，VDV 決定企圖）</p>
+<h4>【交易規則】</h4>
+<p style="margin:0 0 5px 0;color:#f39c12;">*第一層確認「市場狀態與風險環境」(ADV+BDV)，第二層確認「多空方向與進出場依據」(SDV+VDV)。</p>
+<p style="margin:0 0 5px 0;color:#f39c12;">*第三層驗證「市場狀態與風險環境」(ADV_5+BDV_5、ADV_10+BDV_10)，第四層驗證「多空方向與進出場依據」(SDV_5+VDV_5、SDV_10+VDV_10)。</p>
+<p style="margin:0 0 5px 0;color:#f39c12;">*第五層：持倉管理與動態風控。</p>
+<p style="margin:0 0 5px 0;color:#e74c3c;font-weight:bold;">*第六層 (訊號觸發架構)：核心必要條件 + 加權評分，兩階段觸發。</p>
+<p style="margin:0 0 5px 0;color:#27ae60;font-weight:bold;">*第七層 (訊號優化機制)：出場邏輯分層化、位階過高排除、A/B/C 重新校準、冷卻期機制。</p>
+<p style="margin:0 0 5px 0;color:#8e44ad;font-weight:bold;">*第八層 (四軌進場) <span class="new-badge">NEW</span>：評估順序為「軌 1 → 軌 3 → 軌 2 → 軌 4」。軌 1 常規訊號（5 種），軌 3 盤整突破 Squeeze（S 級 30%），軌 2 早期試單（C 級 30%），軌 4 戰術動能（T 級 20~30%）。嚴格訊號優先，寬鬆訊號補充。</p>
+<p style="margin:0;color:#e74c3c;font-weight:bold;">*第九層 (資金架構) <span class="new-badge">NEW</span>：核心倉 60%、戰術倉 30%、機動倉 10%，總曝險 ≤100%。</p>
+</div>
 
-            <div id="cardSignal" class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
-                <div class="text-sm font-bold text-slate-400 mb-1">當前系統決策訊號</div>
-                <div id="signalBadge" class="inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-slate-700 text-slate-300 text-center">
-                    等待分析
-                </div>
-            </div>
-        </div>
+<h3>1. 核心指標位階速查矩陣</h3>
+<table>
+<thead><tr><th>數值區間</th><th>SDV (價格位階)</th><th>VDV (資金強度)</th><th>ADV (風險程度)</th><th>BDV (週期張力)</th></tr></thead>
+<tbody>
+<tr><td><strong>$\ge 70$</strong></td><td>極致超買/強勢主攻</td><td>極致爆量/天量換手</td><td>極致劇烈/高風險暴甩</td><td>極致擴張/通道張裂頂點</td></tr>
+<tr><td><strong>60~69</strong></td><td>多頭強勢/趨勢延伸</td><td>顯著放量/資金積極</td><td>波動擴張/風險升溫</td><td>通道擴張/主升(跌)段</td></tr>
+<tr><td><strong>50~59</strong></td><td>中性偏多/溫和控盤</td><td>常態量能/資金中性</td><td>中度波動/風險適性</td><td>中軸運作/態勢緩和</td></tr>
+<tr><td><strong>40~49</strong></td><td>中性偏空/溫和控盤</td><td>量能微縮/資金觀望</td><td>波動收斂/風險偏低</td><td>通道收縮/區間盤整</td></tr>
+<tr><td><strong>30~39</strong></td><td>空頭強勢/趨勢下尋</td><td>低迷量能/顯著縮量</td><td>低度波動/市場沉寂</td><td>高度擠壓/變盤蓄勢</td></tr>
+<tr><td><strong>&lt; 30</strong></td><td>極致超賣/恐慌主跌</td><td>極致窒息量/量能冰點</td><td>極致平靜/波動死寂</td><td>極致收縮/Squeeze 臨界</td></tr>
+</tbody>
+</table>
 
-        <!-- 四指標 T-Score 現況 -->
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700">
-                <div class="text-sm font-bold text-slate-400 mb-1">價格位階 (SDV)</div>
-                <div id="sdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
-                <div id="sdvStatus" class="text-xs mt-2 text-slate-400">--</div>
-            </div>
+<h3>2. 六大進場訊號速查矩陣（v11.0 新增戰術動能）</h3>
+<table>
+<thead><tr><th width="11%">訊號名稱</th><th width="7%">軌道</th><th width="7%">評級</th><th width="9%">倉位</th><th width="35%">核心必要條件</th><th width="31%">評分權重</th></tr></thead>
+<tbody>
+<tr><td><strong>突破前高</strong></td><td><span class="track-badge track-1">軌1</span></td><td><span class="grade-B">B</span></td><td><strong>50%</strong></td><td class="cell-subtext">收盤 ≥ 20 日新高<br>VDV ≥ 60<br>SDV 50~65</td><td class="cell-subtext">固定 70 分</td></tr>
+<tr><td><strong>蓄勢突破</strong></td><td><span class="track-badge track-1">軌1</span></td><td><span class="grade-A">A</span>/<span class="grade-B">B</span></td><td><strong>70%/50%</strong></td><td class="cell-subtext">ADV 35~65<br>BDV &lt; 55<br>SDV 45~68<br>VDV ≥ 50</td><td class="cell-subtext">中線 30 / 短線 40 / 單日 30<br>（A ≥ 70、B ≥ 50）</td></tr>
+<tr><td><strong>順勢拉回</strong></td><td><span class="track-badge track-1">軌1</span></td><td><span class="grade-A">A</span>/<span class="grade-B">B</span></td><td><strong>70%/50%</strong></td><td class="cell-subtext">ADV 35~65<br>BDV 40~70<br>SDV 45~65<br>VDV &lt; 50</td><td class="cell-subtext">中線 30 / 短線 40 / 單日 30<br>（A ≥ 70、B ≥ 50）</td></tr>
+<tr><td><strong>假跌破掃蕩</strong></td><td><span class="track-badge track-1">軌1</span></td><td><span class="grade-A">A</span>/<span class="grade-B">B</span></td><td><strong>70%/50%</strong></td><td class="cell-subtext">前一日 SDV &lt; 55<br>今日 SDV ≥ 45<br>ADV 45~70<br>BDV &lt; 60</td><td class="cell-subtext">中線 10 / 短線 40 / 單日 50<br>（A ≥ 70、B ≥ 50）</td></tr>
+<tr><td><strong>極致超跌</strong></td><td><span class="track-badge track-1">軌1</span></td><td><span class="grade-A">A</span>/<span class="grade-B">B</span></td><td><strong>70%/50%</strong></td><td class="cell-subtext">ADV ≥ 60<br>BDV ≥ 60<br>SDV &lt; 35<br>VDV ≥ 60</td><td class="cell-subtext">超賣 40 / 中線 20 / 短線 20 / 單日 20<br>（門檻 ≥ 45）</td></tr>
+<tr style="background:#fff0f0;"><td><strong>戰術動能</strong> <span class="new-badge">NEW</span></td><td><span class="track-badge track-4">軌4</span></td><td><span class="grade-T">T</span></td><td><strong>20~30%</strong></td><td class="cell-subtext">ΔSDV_1 ≥ 3<br>ΔVDV_1 ≥ 3<br>ADV 35~68<br>BDV 30~70<br>SDV 45~68</td><td class="cell-subtext">動能 50 / 環境 30 / 位階 20<br>（門檻 ≥ 60）</td></tr>
+</tbody>
+</table>
 
-            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700">
-                <div class="text-sm font-bold text-slate-400 mb-1">資金強度 (VDV)</div>
-                <div id="vdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
-                <div id="vdvStatus" class="text-xs mt-2 text-slate-400">--</div>
-            </div>
+<h3>3. 四軌進場速查矩陣 <span class="new-badge">NEW</span></h3>
+<div class="note-box" style="border-left-color:#8e44ad;">
+<h4 style="color:#8e44ad;">【評估順序：軌 1 → 軌 3 → 軌 2 → 軌 4】</h4>
+<p style="margin:5px 0;">嚴格訊號優先，寬鬆訊號補充。軌 4 可與其他軌並行，但總曝險 ≤100%。</p>
+</div>
+<table>
+<thead><tr><th width="10%">軌道</th><th width="13%">訊號名稱</th><th width="30%">核心條件</th><th width="8%">評級</th><th width="8%">倉位</th><th width="31%">用途</th></tr></thead>
+<tbody>
+<tr style="background:#e6f0fa;"><td><span class="track-badge track-1">軌1</span></td><td><strong>常規訊號</strong></td><td class="cell-subtext">5 種子訊號（蓄勢突破、順勢拉回、假跌破、極致超跌、突破前高）</td><td><span class="grade-A">A</span>/<span class="grade-B">B</span></td><td><strong>50~70%</strong></td><td>主力進場點</td></tr>
+<tr style="background:#f4ebff;"><td><span class="track-badge track-3">軌3</span></td><td><strong>盤整突破</strong><br>(Squeeze)</td><td class="cell-subtext"><strong>BDV &lt; 45</strong>（放寬）<br><strong>SDV 48~65</strong>（放寬）<br>量 ≥ 前5日均量 × 1.10（放寬）<br>ΔSDV_1 ≥ 1.5 且 ΔBDV_1 ≥ 0.5（放寬）</td><td><span class="grade-S">S</span></td><td><strong>30%</strong></td><td>捕捉 Squeeze 突破</td></tr>
+<tr style="background:#fff8e1;"><td><span class="track-badge track-2">軌2</span></td><td><strong>早期試單</strong></td><td class="cell-subtext"><strong>價格貼近 MA20 ±2.5%</strong>（放寬）<br><strong>SDV 45~60</strong>（放寬）<br><strong>VDV 45~65</strong>（放寬）<br>互斥：最近 2 天無常規訊號（放寬）</td><td><span class="grade-C">C</span></td><td><strong>30%</strong></td><td>提早卡位，等確認後加碼</td></tr>
+<tr style="background:#ffe6e6;"><td><span class="track-badge track-4">軌4</span></td><td><strong>戰術動能</strong> <span class="new-badge">NEW</span></td><td class="cell-subtext"><strong>ΔSDV_1 ≥ 3</strong><br><strong>ΔVDV_1 ≥ 3</strong><br><strong>ADV 35~68</strong><br><strong>BDV 30~70</strong><br><strong>SDV 45~68</strong></td><td><span class="grade-T">T</span></td><td><strong>20~30%</strong></td><td>日線級高頻，嚴格停損</td></tr>
+</tbody>
+</table>
 
-            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700">
-                <div class="text-sm font-bold text-slate-400 mb-1">風險環境 (ADV)</div>
-                <div id="advValue" class="text-4xl font-extrabold font-mono text-white">--</div>
-                <div id="advStatus" class="text-xs mt-2 text-slate-400">--</div>
-            </div>
+<h3>4. A/B/C/S/T 五級訊號與倉位對應</h3>
+<table>
+<thead><tr><th width="9%">等級</th><th width="18%">評分/來源</th><th width="28%">訊號性質</th><th width="13%">建議倉位</th><th width="32%">適用場景</th></tr></thead>
+<tbody>
+<tr><td><span class="grade-A">A 級</span></td><td>加權評分 ≥ 70</td><td class="cell-subtext">完美共振：三層時間框架同向</td><td><strong>70%</strong></td><td class="cell-subtext">趨勢明確，可積極布局</td></tr>
+<tr><td><span class="grade-B">B 級</span></td><td>加權評分 50~69</td><td class="cell-subtext">主要條件共振</td><td><strong>50%</strong></td><td class="cell-subtext">常態交易主力訊號</td></tr>
+<tr><td><span class="grade-S">S 級</span></td><td>盤整突破訊號</td><td class="cell-subtext">BDV &lt; 45 且量增 10% 以上</td><td><strong>30%</strong></td><td class="cell-subtext">Squeeze 突破，等確認加碼</td></tr>
+<tr><td><span class="grade-C">C 級</span></td><td>早期試單訊號</td><td class="cell-subtext">貼近 MA20 ±2.5%，動能初啟</td><td><strong>30%</strong></td><td class="cell-subtext">提早卡位，等確認加碼</td></tr>
+<tr><td><span class="grade-T">T 級</span> <span class="new-badge">NEW</span></td><td>Δ 動能觸發</td><td class="cell-subtext">ΔSDV_1≥3、ΔVDV_1≥3、ADV 35~68、BDV 30~70</td><td><strong>20~30%</strong></td><td class="cell-subtext">日線級高頻，持有 1~15 日</td></tr>
+</tbody>
+</table>
 
-            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700">
-                <div class="text-sm font-bold text-slate-400 mb-1">週期張力 (BDV)</div>
-                <div id="bdvValue" class="text-4xl font-extrabold font-mono text-white">--</div>
-                <div id="bdvStatus" class="text-xs mt-2 text-slate-400">--</div>
-            </div>
-        </div>
+<h3>5. 加碼機制速查矩陣（v11.0 放寬版）</h3>
+<div class="note-box">
+<h4>【加碼邏輯：獲利觸發，非訊號觸發】</h4>
+<ul>
+<li>A/B 級：獲利 +4%、SDV ≥ 58、VDV ≥ 55 即可加碼。</li>
+<li>S/C 級：獲利 +4%、SDV ≥ 60、VDV ≥ 60 即可加碼。</li>
+<li>T 級：不建議加碼，或僅加碼一次至 50%。</li>
+</ul>
+</div>
+<table>
+<thead><tr><th width="11%">入場評級</th><th width="12%">初始倉位</th><th width="19%">加碼 1<br>(獲利 +4%)</th><th width="19%">加碼 2<br>(獲利 +8%)</th><th width="19%">加碼 3<br>(獲利 +15%)</th><th width="12%">最終倉位</th></tr></thead>
+<tbody>
+<tr><td><span class="grade-A">A 級</span></td><td>70%</td><td class="cell-subtext">加 10%<br>（SDV≥58、VDV≥55）</td><td class="cell-subtext">加 10%<br>（SDV≥60、VDV≥55）</td><td class="cell-subtext">加 10%<br>（SDV≥65、VDV≥55）</td><td><strong>100%</strong></td></tr>
+<tr><td><span class="grade-B">B 級</span></td><td>50%</td><td class="cell-subtext">加 20%<br>（SDV≥58、VDV≥55）</td><td class="cell-subtext">加 20%<br>（SDV≥60、VDV≥55）</td><td class="cell-subtext">加 10%<br>（SDV≥65、VDV≥55）</td><td><strong>100%</strong></td></tr>
+<tr><td><span class="grade-C">C 級</span></td><td>30%</td><td class="cell-subtext">加 40%<br>（SDV≥60、VDV≥60）</td><td>—</td><td>—</td><td><strong>70%</strong></td></tr>
+<tr><td><span class="grade-S">S 級</span></td><td>30%</td><td class="cell-subtext">加 40%<br>（SDV≥60、VDV≥60）</td><td>—</td><td>—</td><td><strong>70%</strong></td></tr>
+<tr><td><span class="grade-T">T 級</span></td><td>20~30%</td><td class="cell-subtext">不建議加碼</td><td>—</td><td>—</td><td><strong>20~30%</strong></td></tr>
+</tbody>
+</table>
 
-        <!-- ADV 動態移動風控樞紐 -->
-        <div class="bg-slate-800/90 p-6 rounded-xl border border-sky-500/30 shadow-xl space-y-4">
-            <div class="flex items-center justify-between border-b border-slate-700 pb-3">
-                <h3 class="text-lg font-bold text-sky-400">🛡️ ADV 波動度驅動之動態移動風控樞紐</h3>
-                <span class="text-xs px-2.5 py-1 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/20">適應型移動風控</span>
-            </div>
+<h3>6. 五層出場機制（v11.0 新增第五層）</h3>
+<table>
+<thead><tr><th width="8%">優先級</th><th width="17%">出場類型</th><th width="33%">觸發條件</th><th width="12%">動作</th><th width="30%">說明</th></tr></thead>
+<tbody>
+<tr><td><strong>1</strong></td><td><strong>ATR 動態停損</strong></td><td class="cell-subtext">收盤 ≤ 進場均價 - (1.5/2.0/2.5/3.0) × ATR</td><td>全數出場</td><td class="cell-subtext">硬性風控，依 ADV 動態</td></tr>
+<tr><td><strong>2</strong></td><td><strong>移動停利</strong></td><td class="cell-subtext">依當前收益觸發分段鎖利（見表 A）</td><td>全數出場</td><td class="cell-subtext">保護利潤</td></tr>
+<tr><td><strong>3</strong></td><td><strong>訊號反轉</strong></td><td class="cell-subtext">前一日 SDV ≥ 50 且今日 SDV &lt; 50 且 VDV ≥ 60</td><td>全數出場</td><td class="cell-subtext">趨勢反轉確認</td></tr>
+<tr><td><strong>4</strong></td><td><strong>時間停損</strong></td><td class="cell-subtext">持倉 ≥ 20 天且累積報酬 &lt; +8%</td><td>全數出場</td><td class="cell-subtext">釋放卡住的資金</td></tr>
+<tr style="background:#ffe6e6;"><td><strong>5</strong> <span class="new-badge">NEW</span></td><td><strong>戰術動能出場</strong></td><td class="cell-subtext">+5% 減半、+8~10% 全出<br>或 ΔSDV_1 與 ΔVDV_1 雙轉負<br>或 -3% / 1.5×ATR 停損</td><td>減碼或全出</td><td class="cell-subtext">T 級專用，持有 1~15 日</td></tr>
+</tbody>
+</table>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-700/80">
-                    <div class="text-xs text-slate-400 mb-1">當前 ADV 停損模式 (Dynamic Stop-Loss)</div>
-                    <div id="advStopLossMode" class="text-sm font-bold text-amber-400">--</div>
-                    <div id="advStopLossRule" class="text-xs text-slate-300 mt-2 leading-relaxed">--</div>
-                </div>
+<h4 style="color:#18bc9c;margin-top:30px;">表 A：動態停損基準（依 ADV）</h4>
+<table>
+<thead><tr><th width="18%">ADV 位階</th><th width="22%">初始停損距離</th><th width="33%">移動停利觸發</th><th width="27%">倉位建議</th></tr></thead>
+<tbody>
+<tr><td>$30 \sim 40$</td><td>1.5 × ATR</td><td class="cell-subtext">+5% → 保本<br>+10% → 鎖 3%<br>+15% → 鎖 8%<br>+20% → 最高 -3.5 ATR</td><td>正常</td></tr>
+<tr><td>$40 \sim 60$</td><td>2.0 × ATR</td><td class="cell-subtext">同上</td><td>正常</td></tr>
+<tr><td>$60 \sim 68$</td><td>2.5 × ATR</td><td class="cell-subtext">同上</td><td>減 1/4</td></tr>
+<tr><td>$\ge 70$</td><td>3.0 × ATR</td><td class="cell-subtext">同上</td><td>減 1/2（E5 排除戰術）</td></tr>
+</tbody>
+</table>
 
-                <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-700/80">
-                    <div class="text-xs text-slate-400 mb-1">移動停利監控 (Trailing Take-Profit)</div>
-                    <div id="advTakeProfitAlert" class="text-sm font-semibold text-emerald-400">常態監控中</div>
-                    <div class="text-xs text-slate-400 mt-2">移動停利分段：+5%（保本）→ +10%（鎖3%）→ +15%（鎖8%）→ +20%（過熱高潮）</div>
-                </div>
-            </div>
-        </div>
+<h3>7. 冷卻期機制（v11.0 高頻版）</h3>
+<table>
+<thead><tr><th width="25%">情境</th><th width="25%">觸發條件</th><th width="20%">冷卻天數</th><th width="30%">說明</th></tr></thead>
+<tbody>
+<tr><td>單筆虧損</td><td class="cell-subtext">最近一筆虧損收場</td><td><strong>2 個交易日</strong></td><td class="cell-subtext">短期內不發出新買入訊號</td></tr>
+<tr><td>連續兩筆虧損</td><td class="cell-subtext">連續 2 筆虧損</td><td><strong>4 個交易日</strong></td><td class="cell-subtext">冷卻期加倍</td></tr>
+<tr><td>連續三筆虧損</td><td class="cell-subtext">連續 3 筆虧損</td><td><strong>6 個交易日</strong></td><td class="cell-subtext">進入檢修期</td></tr>
+<tr><td>獲利出場</td><td class="cell-subtext">獲利 &gt; +3%</td><td><strong>無冷卻</strong></td><td class="cell-subtext">強勢股可接續</td></tr>
+<tr><td>大盤多頭</td><td class="cell-subtext">大盤 SDV &gt; 60</td><td><strong>冷卻減半</strong></td><td class="cell-subtext">順勢加速</td></tr>
+</tbody>
+</table>
 
-        <!-- Δ 動能矩陣 -->
-        <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-            <h3 class="text-lg font-bold text-slate-200 mb-4">多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)</h3>
+<h3>8. 位階過高排除條款（E1~E6）</h3>
+<table>
+<thead><tr><th width="7%">編號</th><th width="38%">排除條件</th><th width="55%">說明</th></tr></thead>
+<tbody>
+<tr><td><strong>E1</strong></td><td class="cell-subtext">SDV ≥ 80</td><td class="cell-subtext">價格極致超買，避免追高</td></tr>
+<tr><td><strong>E2</strong></td><td class="cell-subtext">ΔSDV_5 ≥ 25</td><td class="cell-subtext">5 日累積漲幅過大，接刀風險</td></tr>
+<tr><td><strong>E3</strong></td><td class="cell-subtext">收盤 &gt; MA20 × 1.20</td><td class="cell-subtext">正乖離過大，均值回歸壓力</td></tr>
+<tr><td><strong>E4</strong></td><td class="cell-subtext">ΔBDV_10 ≥ 15 且 SDV ≥ 70</td><td class="cell-subtext">通道極致擴張且價格高位，趨勢衰竭</td></tr>
+<tr style="background:#ffe6e6;"><td><strong>E5</strong> <span class="new-badge">NEW</span></td><td class="cell-subtext">戰術訊號 SDV ≥ 75 或 ΔSDV_5 ≥ 25</td><td class="cell-subtext">戰術倉避免追高</td></tr>
+<tr style="background:#ffe6e6;"><td><strong>E6</strong> <span class="new-badge">NEW</span></td><td class="cell-subtext">日均量 &lt; 5,000 張</td><td class="cell-subtext">排除高頻戰術流動性風險</td></tr>
+</tbody>
+</table>
 
-            <div class="overflow-x-auto">
-                <table class="w-full text-center text-sm border-collapse">
-                    <thead>
-                        <tr class="bg-slate-900/80 text-slate-400 border-b border-slate-700">
-                            <th class="p-3 text-left">指標類型</th>
-                            <th class="p-3">當前 T-Score</th>
-                            <th class="p-3">Δ₁ (單日動能)</th>
-                            <th class="p-3">Δ₅ (短線動能)</th>
-                            <th class="p-3">Δ₁₀ (中線結構)</th>
-                        </tr>
-                    </thead>
-                    <tbody id="deltaMatrixBody" class="divide-y divide-slate-700/50 font-mono">
-                        <tr><td colspan="5" class="p-4 text-slate-500">尚無資料</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- 歷史系統決策訊號紀錄 -->
-        <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg space-y-4">
-            <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-700 pb-3 gap-2">
-                <div>
-                    <h3 class="text-lg font-bold text-amber-400">📜 歷史系統決策訊號紀錄 (近 1 年 / 250 交易日)</h3>
-                    <p id="historySummary" class="text-xs text-slate-400 mt-1">等待數據加載中...</p>
-                </div>
-                <span class="text-xs px-2.5 py-1 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">系統歷史檢驗</span>
-            </div>
-
-            <div class="overflow-x-auto max-h-96 overflow-y-auto">
-                <table class="w-full text-center text-sm border-collapse">
-                    <thead class="sticky top-0 bg-slate-900 border-b border-slate-700">
-                        <tr class="text-xs uppercase tracking-wider text-slate-400 border-b border-slate-800">
-                            <th colspan="3" class="p-2 bg-emerald-950/40 text-emerald-400 border-r border-slate-700">買入交易紀錄</th>
-                            <th colspan="3" class="p-2 bg-rose-950/40 text-rose-400">賣出交易紀錄</th>
-                        </tr>
-                        <tr class="text-slate-300">
-                            <th class="p-3 font-semibold">交易日期</th>
-                            <th class="p-3 font-semibold">買入價格</th>
-                            <th class="p-3 font-semibold border-r border-slate-700">決策訊號</th>
-                            <th class="p-3 font-semibold">交易日期</th>
-                            <th class="p-3 font-semibold">賣出價格</th>
-                            <th class="p-3 font-semibold">決策訊號</th>
-                        </tr>
-                    </thead>
-                    <tbody id="historyTableBody" class="divide-y divide-slate-700/50 font-mono">
-                        <tr><td colspan="6" class="p-4 text-slate-500 text-center font-sans">點擊「實時分析」進行動態計算...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-    </div>
-
-    <script src="quantEngine.js"></script>
-    <script src="main.js"></script>
+<div class="danger-box">
+<h4>【風險與注意事項】</h4>
+<ul>
+<li><strong>先定義參數：</strong>ATR(14)；布林帶 (20,2)。</li>
+<li><strong>避免過度擬合：</strong>ATR 倍數最多 4 檔。</li>
+<li><strong>停損與停利執行：</strong>停損可盤中觸發；停利建議收盤確認或分批執行。</li>
+<li><strong>跳空與滑價：</strong>ADV ≥ 70 時停損可能滑價，應搭配減倉。</li>
+<li><strong>震盪期保護：</strong>BDV &lt; 40 時停損不宜過緊。</li>
+<li><strong>四軌順序不可顛倒：</strong>軌 1 → 軌 3 → 軌 2 → 軌 4。</li>
+<li><strong>戰術倉必須小倉位：</strong>T 級 20~30%，停損 -3% 或 1.5×ATR。</li>
+<li><strong>高頻成本：</strong>來回約 0.585%，單筆預期報酬須 &gt; 1.5%。</li>
+<li><strong>本系統為多頭版：</strong>空頭須對稱設計或降低倉位。</li>
+</ul>
+</div>
+</section>
+</main>
 </body>
 </html>
