@@ -1,18 +1,14 @@
 /**
- * quantEngine.js - 四指標趨勢分析核心引擎 (v11.0 日線級高頻高報酬版)
+ * quantEngine.js - 四指標趨勢分析核心引擎 (v11.0.1 修正版)
  * 
  * 完整對齊《四指標趨勢分析說明文案 v11.0》
  * 
- * ========== 核心功能 ==========
- * 1. 對數 T-Score（SDV / VDV / ADV / BDV），window=30
- * 2. 多週期動能 Δ₁ / Δ₅ / Δ₁₀
- * 3. 四軌進場（軌 1 → 軌 3 → 軌 2 → 軌 4）
- * 4. 五層出場（ATR停損 / 移動停利 / 訊號反轉 / 時間停損 / 戰術動能出場）
- * 5. 三層資金架構（核心 60% / 戰術 25% / 機動 15%）
- * 6. A/B/C/S/T 五級訊號
- * 7. 冷卻期（2/4/6 天，獲利免冷卻）
- * 8. 排除條款 E1~E6
- * 9. 機動倉專用：僅極致超跌訊號
+ * ========== 修正記錄 (v11.0.1) ==========
+ * - 新增 TACTICAL_MAX_HOLD_DAYS: 15（T 級最長持有天數）
+ * - TACTICAL_TP_FULL 由 10 改為 8（對齊文案「+8~10% 全出」）
+ * - 部分賣出時同步更新冷卻期與 lossStreak
+ * - 機動倉 allowedTracks 改為空陣列（isMobile 提前 return，避免誤導）
+ * - isExcluded 的 E6 流動性檢查改為可選（避免小型股全被排除）
  */
 
 const QuantConfig = {
@@ -91,16 +87,18 @@ const QuantConfig = {
   TACTICAL_SDV_MIN: 45,
   TACTICAL_SDV_MAX: 68,
 
-  // 戰術倉專用出場
+  // 戰術倉專用出場（v11.0.1 修正）
   TACTICAL_TP_HALF: 5,
-  TACTICAL_TP_FULL: 10,
+  TACTICAL_TP_FULL: 8,           // 由 10 改為 8，對齊文案「+8~10% 全出」
   TACTICAL_SL_PCT: -3,
   TACTICAL_SL_ATR: 1.5,
+  TACTICAL_MAX_HOLD_DAYS: 15,    // 新增：T 級最長持有天數
 
   // 排除條款 E5 / E6
   E5_SDV_MAX: 75,
   E5_D5_SDV_MAX: 25,
   E6_MIN_VOLUME: 5000000,
+  E6_ENABLED: false,             // v11.0.1：預設關閉 E6，避免小型股全被排除
 
   DEBUG: false
 };
@@ -233,7 +231,7 @@ class QuantEngine {
   }
 
   // ============================================================
-  // 排除條款 E1~E6
+  // 排除條款 E1~E6（v11.0.1 修正）
   // ============================================================
   isExcluded(r, isTactical = false) {
     if (r.sdv >= 80) return 'E1';
@@ -244,7 +242,8 @@ class QuantEngine {
       if (r.sdv >= this.config.E5_SDV_MAX) return 'E5';
       if (r.d5_sdv !== null && r.d5_sdv >= this.config.E5_D5_SDV_MAX) return 'E5';
     }
-    if (r.volume < this.config.E6_MIN_VOLUME) return 'E6';
+    // E6 改為可選（預設關閉）
+    if (this.config.E6_ENABLED && r.volume < this.config.E6_MIN_VOLUME) return 'E6';
     return null;
   }
 
@@ -528,7 +527,7 @@ class QuantEngine {
   }
 
   // ============================================================
-  // 出場評估（五層）
+  // 出場評估（五層，v11.0.1 修正）
   // ============================================================
   evaluateExit(position, r, i, df) {
     const cfg = this.config;
@@ -549,7 +548,7 @@ class QuantEngine {
           highest, partialRatio: 1.0
         };
       }
-      // +10% 全出
+      // +8% 全出
       if (curRet >= cfg.TACTICAL_TP_FULL) {
         return {
           executedPrice: r.close,
@@ -570,6 +569,15 @@ class QuantEngine {
         return {
           executedPrice: r.close,
           reason: `戰術動能轉弱 (ΔSDV₁、ΔVDV₁ 雙負)`,
+          highest, partialRatio: 1.0
+        };
+      }
+      // v11.0.1 新增：T 級最長持有天數 15 日
+      const holdDays = i - position.entryIdx;
+      if (holdDays >= cfg.TACTICAL_MAX_HOLD_DAYS) {
+        return {
+          executedPrice: r.close,
+          reason: `戰術時間停損 (${holdDays}天)`,
           highest, partialRatio: 1.0
         };
       }
@@ -628,7 +636,7 @@ class QuantEngine {
   }
 
   // ============================================================
-  // 三層資金架構回測（60/25/15）
+  // 三層資金架構回測（60/25/15，v11.0.1 修正）
   // ============================================================
   runMultiPoolBacktest(rawCandles, initialCapital = 100000, precomputedDF = null) {
     const cfg = this.config;
@@ -650,7 +658,7 @@ class QuantEngine {
       }
     }
 
-    // ---- 三個資金池 ----
+    // ---- 三個資金池（v11.0.1：mobile.allowedTracks 改為空陣列）----
     const pools = {
       core: {
         name: '核心倉',
@@ -668,7 +676,8 @@ class QuantEngine {
         name: '機動倉',
         capital: initialCapital * cfg.MOBILE_PCT,
         position: null, cooldownUntil: -1, lossStreak: 0, trades: [],
-        allowedTracks: [1], isMobile: true
+        allowedTracks: [],  // v11.0.1：空陣列，避免誤導（isMobile 提前 return）
+        isMobile: true
       }
     };
 
@@ -711,20 +720,24 @@ class QuantEngine {
                 partial: partial < 1.0
               });
 
+              // v11.0.1：無論部分或全出，均更新冷卻期與連敗計數
+              if (retPct > 0) {
+                pool.lossStreak = 0;
+                pool.cooldownUntil = i + 1;
+              } else {
+                pool.lossStreak++;
+                pool.cooldownUntil = i + (pool.lossStreak >= 3 ? cfg.COOLDOWN_3
+                                  : pool.lossStreak >= 2 ? cfg.COOLDOWN_2
+                                  : cfg.COOLDOWN_1);
+              }
+
               if (partial < 1.0) {
+                // 部分出場：保留剩餘倉位
                 pool.position.tacticalHalfSold = true;
                 pool.position.shares = remaining;
                 pool.position.totalCost = pool.position.totalCost * (remaining / (remaining + sellShares));
               } else {
-                if (retPct > 0) {
-                  pool.lossStreak = 0;
-                  pool.cooldownUntil = i + 1;
-                } else {
-                  pool.lossStreak++;
-                  pool.cooldownUntil = i + (pool.lossStreak >= 3 ? cfg.COOLDOWN_3
-                                    : pool.lossStreak >= 2 ? cfg.COOLDOWN_2
-                                    : cfg.COOLDOWN_1);
-                }
+                // 全出：清空倉位
                 pool.position = null;
               }
             }
@@ -756,7 +769,7 @@ class QuantEngine {
         // ===== 進場判斷 =====
         if (i < pool.cooldownUntil) continue;
         if (!r.ma20) continue;
-        if (pool.allowedTracks.length === 0) continue;
+        if (pool.allowedTracks.length === 0 && !pool.isMobile) continue;
 
         const entryRes = this.evaluateEntrySignal(df, i, pool.allowedTracks, pool.isMobile);
         if (entryRes.signal === 'BUY') {

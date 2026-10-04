@@ -1,7 +1,12 @@
 /**
- * main.js - 四指標趨勢分析 UI 控制器 (v11.0 日線級高頻高報酬版)
- * 完整對齊《四指標趨勢分析說明文案 v11.0》與 quantEngine.js v11.0
+ * main.js - 四指標趨勢分析 UI 控制器 (v11.0.1 修正版)
+ * 完整對齊《四指標趨勢分析說明文案 v11.0》與 quantEngine.js v11.0.1
  * 資金配置：核心 60% / 戰術 25% / 機動 15%
+ * 
+ * ========== 修正記錄 (v11.0.1) ==========
+ * - 極致超跌訊號顯示「核心倉 / 機動倉」雙資金池
+ * - 使用 ?? 運算子避免 0 值誤判
+ * - normalizeCandleData 使用 ?? 而非 ||
  */
 
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbyP4to4WeWt17kngG-5UpKIMPz3Mp3tKfzVt6mNBfOQkEuyGQK0rUNxyJHz1jo2_8Iz/exec";
@@ -67,16 +72,16 @@ async function analyzeStock() {
 }
 
 /**
- * 資料清洗與轉換
+ * 資料清洗與轉換（v11.0.1：使用 ?? 運算子）
  */
 function normalizeCandleData(data) {
   return data.map(item => ({
-    date: item.date || item.Date || item.time || '',
-    open: parseFloat(item.open || item.Open || item.close || 0),
-    high: parseFloat(item.high || item.High || item.close || 0),
-    low: parseFloat(item.low || item.Low || item.close || 0),
-    close: parseFloat(item.close || item.Close || 0),
-    volume: parseFloat(item.volume || item.Volume || item.vol || 0)
+    date: item.date ?? item.Date ?? item.time ?? '',
+    open: parseFloat(item.open ?? item.Open ?? item.close ?? 0),
+    high: parseFloat(item.high ?? item.High ?? item.close ?? 0),
+    low: parseFloat(item.low ?? item.Low ?? item.close ?? 0),
+    close: parseFloat(item.close ?? item.Close ?? 0),
+    volume: parseFloat(item.volume ?? item.Volume ?? item.vol ?? 0)
   })).filter(c => c.close > 0 && c.date !== '');
 }
 
@@ -113,7 +118,7 @@ function renderHeaderAndStockInfo(code, name, candles) {
 }
 
 /**
- * 2. 渲染當前系統決策訊號（四軌 + T 級）
+ * 2. 渲染當前系統決策訊號（v11.0.1：極致超跌雙資金池標示）
  */
 function renderSignalBadge(candles) {
   const idx = candles.length - 1;
@@ -145,13 +150,17 @@ function renderSignalBadge(candles) {
     const style = gradeStyles[decision.grade] || gradeStyles['B'];
     const sizePct = Math.round(decision.size * 100);
 
+    // v11.0.1：極致超跌同時觸發核心倉與機動倉
+    const isExtreme = decision.type === '極致超跌';
+    const poolLabel = isExtreme ? '核心倉 / 機動倉' : style.pool;
+
     elBadge.className = `inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm ${style.bg} ${style.text} ${style.border} border text-center`;
     elBadge.textContent = `${style.icon} ${decision.grade}級 ${decision.type} (${decision.score}分)`;
 
     elDesc.className = "text-sm text-slate-300 mt-3 leading-relaxed";
     elDesc.innerHTML = `
       <span class="inline-block px-2 py-0.5 rounded bg-slate-700 text-slate-300 text-xs font-bold">軌道 ${decision.track}</span>
-      <span class="inline-block ml-1 px-2 py-0.5 rounded bg-rose-900 text-rose-300 text-xs font-bold">${style.pool}</span>
+      <span class="inline-block ml-1 px-2 py-0.5 rounded bg-rose-900 text-rose-300 text-xs font-bold">${poolLabel}</span>
       <span class="ml-1">${style.label}</span> · 
       建議倉位 <strong class="${style.text}">${sizePct}%</strong> · 
       進場價 <strong class="font-mono">$${decision.price.toFixed(2)}</strong>
@@ -332,7 +341,7 @@ function renderDeltaMatrix(candles) {
 }
 
 /**
- * 6. 渲染歷史交易紀錄表（含加權總報酬）
+ * 6. 渲染歷史交易紀錄表（v11.0.1：使用 ?? 運算子）
  */
 function renderHistoryTable(trades, dataLength, backtestResult) {
   const tbody = document.getElementById('historyTableBody');
@@ -357,17 +366,16 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
     return;
   }
 
-  // ===== 加權總報酬顯示 =====
+  // ===== 加權總報酬顯示（v11.0.1：使用 ?? 運算子）=====
   if (summaryEl && backtestResult) {
     const wins = trades.filter(t => t.pnlPct > 0).length;
     const winRate = Math.round((wins / trades.length) * 100);
     const p = backtestResult.pools || {};
 
-    const coreRet = p['核心倉']?.returnPct || 0;
-    const tacRet = p['戰術倉']?.returnPct || 0;
-    const mobRet = p['機動倉']?.returnPct || 0;
+    const coreRet = p['核心倉']?.returnPct ?? 0;
+    const tacRet = p['戰術倉']?.returnPct ?? 0;
+    const mobRet = p['機動倉']?.returnPct ?? 0;
 
-    // 加權總報酬（60/25/15）
     const weighted = coreRet * 0.60 + tacRet * 0.25 + mobRet * 0.15;
 
     summaryEl.innerHTML = `
