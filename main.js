@@ -1,16 +1,13 @@
 /**
- * main.js - 四指標趨勢分析 UI 控制器 (v11.0.2 修正版)
- * 完整對齊《四指標趨勢分析說明文案 v11.0》與 quantEngine.js v11.0.1
- * 資金配置：核心 60% / 戰術 25% / 機動 15%
+ * main.js - 四指標趨勢分析 UI 控制器 (v11.0.3 修正版)
  * 
- * ========== 修正記錄 (v11.0.2) ==========
- * - 新增「近 1 年（365 天）過濾」，確保回測區間符合標題
- * - 保留 v11.0.1 修正：極致超跌雙資金池標示、?? 運算子
+ * ========== 修正記錄 (v11.0.3) ==========
+ * - 歷史交易記錄排序改為「升序（由遠至近）」，同日期依資金池排序
+ * - 保留 v11.0.2 修正：近 1 年過濾、極致超跌雙資金池標示、?? 運算子
  */
 
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbyP4to4WeWt17kngG-5UpKIMPz3Mp3tKfzVt6mNBfOQkEuyGQK0rUNxyJHz1jo2_8Iz/exec";
 
-// v11.0.2：近 1 年過濾開關（設為 true 則只保留近 365 天資料）
 const ENABLE_ONE_YEAR_FILTER = true;
 const ONE_YEAR_DAYS = 365;
 
@@ -20,9 +17,6 @@ document.addEventListener('DOMContentLoaded', () => {
   analyzeStock();
 });
 
-/**
- * 主分析進入點
- */
 async function analyzeStock() {
   const elStockInput = document.getElementById('stockInput');
   const elDesc = document.getElementById('decisionDesc');
@@ -51,15 +45,11 @@ async function analyzeStock() {
 
     let candles = normalizeCandleData(rawCandles);
 
-    // v11.0.2：近 1 年過濾
     if (ENABLE_ONE_YEAR_FILTER && candles.length > 0) {
       const lastDate = new Date(candles[candles.length - 1].date);
       const cutoffDate = new Date(lastDate);
       cutoffDate.setDate(cutoffDate.getDate() - ONE_YEAR_DAYS);
-      candles = candles.filter(c => {
-        const d = new Date(c.date);
-        return d >= cutoffDate;
-      });
+      candles = candles.filter(c => new Date(c.date) >= cutoffDate);
     }
 
     if (candles.length < 48) {
@@ -85,9 +75,6 @@ async function analyzeStock() {
   }
 }
 
-/**
- * 資料清洗與轉換（v11.0.1：使用 ?? 運算子）
- */
 function normalizeCandleData(data) {
   return data.map(item => ({
     date: item.date ?? item.Date ?? item.time ?? '',
@@ -99,9 +86,6 @@ function normalizeCandleData(data) {
   })).filter(c => c.close > 0 && c.date !== '');
 }
 
-/**
- * 1. 渲染股票名稱、股價與成交量
- */
 function renderHeaderAndStockInfo(code, name, candles) {
   const last = candles[candles.length - 1];
   const prev = candles[candles.length - 2] || last;
@@ -131,9 +115,6 @@ function renderHeaderAndStockInfo(code, name, candles) {
   }
 }
 
-/**
- * 2. 渲染當前系統決策訊號（v11.0.1：極致超跌雙資金池標示）
- */
 function renderSignalBadge(candles) {
   const idx = candles.length - 1;
   const last = candles[idx];
@@ -150,7 +131,6 @@ function renderSignalBadge(candles) {
     return;
   }
 
-  // 依評估順序：軌 1 → 軌 3 → 軌 2 → 軌 4
   const decision = engine.evaluateEntrySignal(candles, idx, [1, 3, 2, 4], false);
 
   if (decision.signal === 'BUY') {
@@ -164,7 +144,6 @@ function renderSignalBadge(candles) {
     const style = gradeStyles[decision.grade] || gradeStyles['B'];
     const sizePct = Math.round(decision.size * 100);
 
-    // v11.0.1：極致超跌同時觸發核心倉與機動倉
     const isExtreme = decision.type === '極致超跌';
     const poolLabel = isExtreme ? '核心倉 / 機動倉' : style.pool;
 
@@ -199,9 +178,6 @@ function renderSignalBadge(candles) {
   elDesc.textContent = `當前 SDV ${Math.round(sdv)}，系統持續監控四軌訊號中。`;
 }
 
-/**
- * 3. 渲染 4 大指標 T-Score 卡片
- */
 function renderTScoreCards(candles) {
   const last = candles[candles.length - 1];
 
@@ -242,9 +218,6 @@ function renderTScoreCards(candles) {
   updateCard('bdvValue', 'bdvStatus', last.bdv, 65, 35);
 }
 
-/**
- * 4. 渲染 ADV 動態移動風控樞紐
- */
 function renderAdvRiskHub(candles) {
   const last = candles[candles.length - 1];
   const prev = candles[candles.length - 2] || last;
@@ -308,9 +281,6 @@ function renderAdvRiskHub(candles) {
   }
 }
 
-/**
- * 5. 渲染多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)
- */
 function renderDeltaMatrix(candles) {
   const tbody = document.getElementById('deltaMatrixBody');
   if (!tbody) return;
@@ -354,9 +324,6 @@ function renderDeltaMatrix(candles) {
   }).join('');
 }
 
-/**
- * 6. 渲染歷史交易紀錄表（v11.0.1：使用 ?? 運算子）
- */
 function renderHistoryTable(trades, dataLength, backtestResult) {
   const tbody = document.getElementById('historyTableBody');
   const summaryEl = document.getElementById('historySummary');
@@ -380,7 +347,7 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
     return;
   }
 
-  // ===== 加權總報酬顯示（v11.0.1：使用 ?? 運算子；v11.0.2：60/25/15）=====
+  // 加權總報酬顯示（60/25/15）
   if (summaryEl && backtestResult) {
     const wins = trades.filter(t => t.pnlPct > 0).length;
     const winRate = Math.round((wins / trades.length) * 100);
@@ -390,7 +357,6 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
     const tacRet = p['戰術倉']?.returnPct ?? 0;
     const mobRet = p['機動倉']?.returnPct ?? 0;
 
-    // v11.0.2：加權總報酬權重改為 60/25/15
     const weighted = coreRet * 0.60 + tacRet * 0.25 + mobRet * 0.15;
 
     summaryEl.innerHTML = `
@@ -402,6 +368,7 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
     `;
   }
 
+  // v11.0.3：交易記錄已於 quantEngine 內部排序（升序：由遠至近）
   trades.forEach(t => {
     const row = document.createElement('tr');
     row.className = 'border-b border-slate-700/40 hover:bg-slate-800/60 transition';
