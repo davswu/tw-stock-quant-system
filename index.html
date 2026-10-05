@@ -143,27 +143,26 @@
                     <p id="historyDateRange" class="text-xs text-slate-400 mt-1">資料期間：載入中...</p>
                     <p id="historySummary" class="text-xs text-slate-400 mt-1">等待數據加載中...</p>
                 </div>
-                <span class="text-xs px-2.5 py-1 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">系統歷史檢驗</span>
+                <div id="viewToggle" class="flex gap-2">
+                    <!-- 切換按鈕由 JS 動態生成 -->
+                </div>
             </div>
 
-            <div class="overflow-x-auto max-h-96 overflow-y-auto">
+            <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
                 <table class="w-full text-center text-sm border-collapse">
-                    <thead class="sticky top-0 bg-slate-900 border-b border-slate-700">
-                        <tr class="text-xs uppercase tracking-wider text-slate-400 border-b border-slate-800">
-                            <th colspan="3" class="p-2 bg-emerald-950/40 text-emerald-400 border-r border-slate-700">買入交易紀錄</th>
-                            <th colspan="3" class="p-2 bg-rose-950/40 text-rose-400">賣出交易紀錄</th>
-                        </tr>
+                    <thead class="sticky top-0 bg-slate-900 border-b border-slate-700 z-10">
                         <tr class="text-slate-300">
                             <th class="p-3 font-semibold">交易日期</th>
-                            <th class="p-3 font-semibold">買入價格</th>
-                            <th class="p-3 font-semibold border-r border-slate-700">決策訊號</th>
-                            <th class="p-3 font-semibold">交易日期</th>
-                            <th class="p-3 font-semibold">賣出價格</th>
-                            <th class="p-3 font-semibold">決策訊號</th>
+                            <th class="p-3 font-semibold">價格</th>
+                            <th class="p-3 font-semibold">訊號</th>
+                            <th class="p-3 font-semibold">動作</th>
+                            <th class="p-3 font-semibold">張數</th>
+                            <th class="p-3 font-semibold">資金池</th>
+                            <th class="p-3 font-semibold">報酬</th>
                         </tr>
                     </thead>
                     <tbody id="historyTableBody" class="divide-y divide-slate-700/50 font-mono">
-                        <tr><td colspan="6" class="p-4 text-slate-500 text-center font-sans">點擊「分析」進行動態計算...</td></tr>
+                        <tr><td colspan="7" class="p-4 text-slate-500 text-center font-sans">點擊「分析」進行動態計算...</td></tr>
                     </tbody>
                 </table>
             </div>

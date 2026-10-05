@@ -2,10 +2,10 @@
  * main.js - 四指標趨勢分析 UI 控制器
  * 
  * ========== 核心設計 ==========
- * - 資金配置：核心倉 85% / 戰術倉 15% / 機動倉取消
+ * - 資金配置：核心倉 85% / 戰術倉 15%
  * - 當日分析：頁首、四指標、ADV 風控、Δ 動能矩陣
- * - 歷史回測：頁尾歷史系統決策訊號紀錄（近 1 年 / 250 交易日）
- * - 遇非交易日，當日分析使用前一個交易日資料
+ * - 歷史回測：頁尾歷史系統決策訊號紀錄
+ * - 交易單位：張（1 張 = 1000 股）
  */
 
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbyP4to4WeWt17kngG-5UpKIMPz3Mp3tKfzVt6mNBfOQkEuyGQK0rUNxyJHz1jo2_8Iz/exec";
@@ -67,7 +67,6 @@ async function analyzeStock() {
       throw new Error(`數據長度僅 ${candles.length} 天，不足 48 天指標暖機門檻`);
     }
 
-    // 【新增】渲染當日資料日期資訊（頁首）
     renderDataDateInfo(candles, originalLength, stockCode);
 
     const processedCandles = engine.calculateIndicators(candles);
@@ -93,9 +92,6 @@ async function analyzeStock() {
   }
 }
 
-/**
- * 資料清洗與轉換
- */
 function normalizeCandleData(data) {
   return data.map(item => ({
     date: item.date ?? item.Date ?? item.time ?? '',
@@ -107,11 +103,6 @@ function normalizeCandleData(data) {
   })).filter(c => c.close > 0 && c.date !== '');
 }
 
-/**
- * 【新增】渲染資料日期資訊
- * - 頁首：當日資料截止（如遇非交易日，顯示前一交易日）
- * - 頁尾：歷史回測期間
- */
 function renderDataDateInfo(candles, originalLength, stockCode) {
   const elDataDate = document.getElementById('dataDateInfo');
   if (!elDataDate || candles.length === 0) return;
@@ -120,32 +111,22 @@ function renderDataDateInfo(candles, originalLength, stockCode) {
   const firstDateStr = candles[0].date;
   const lastDate = new Date(lastDateStr);
   const today = new Date();
-
-  // 判斷今天是否為交易日（簡易判斷：週一至週五）
-  const dayOfWeek = today.getDay();
-  const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
-
-  // 計算延遲天數
   const dayDiff = Math.floor((today - lastDate) / (1000 * 60 * 60 * 24));
 
-  // 判斷是否為當日資料
-  let statusText = '';
-  let statusClass = 'text-xs text-emerald-400 mt-1';
+  let expectedLatest;
+  const dayOfWeek = today.getDay();
+  if (dayOfWeek === 0) expectedLatest = 2;
+  else if (dayOfWeek === 6) expectedLatest = 1;
+  else if (dayOfWeek === 1) expectedLatest = 3;
+  else expectedLatest = 1;
 
-  if (dayDiff === 0) {
-    statusText = '（當日資料）';
+  let statusText, statusClass;
+  if (dayDiff <= expectedLatest) {
+    if (dayDiff === 0) statusText = '（當日資料）';
+    else statusText = `（最近交易日資料，延遲 ${dayDiff} 天，正常）`;
     statusClass = 'text-xs text-emerald-400 mt-1';
-  } else if (dayDiff === 1 && isWeekend) {
-    statusText = '（非交易日，顯示前一交易日）';
-    statusClass = 'text-xs text-sky-400 mt-1';
-  } else if (dayDiff === 1) {
-    statusText = '（盤後資料，正常）';
-    statusClass = 'text-xs text-emerald-400 mt-1';
-  } else if (dayDiff <= 3) {
-    statusText = `（非交易日，顯示前一交易日，延遲 ${dayDiff} 天）`;
-    statusClass = 'text-xs text-sky-400 mt-1';
-  } else if (dayDiff <= 5) {
-    statusText = `（延遲 ${dayDiff} 天，請確認是否休市）`;
+  } else if (dayDiff <= expectedLatest + 2) {
+    statusText = `（延遲 ${dayDiff} 天，可能為假日或資料尚未更新）`;
     statusClass = 'text-xs text-amber-400 mt-1';
   } else {
     statusText = `（延遲 ${dayDiff} 天，可能有異常）`;
@@ -155,18 +136,12 @@ function renderDataDateInfo(candles, originalLength, stockCode) {
   elDataDate.textContent = `📅 當日資料截止：${lastDateStr} ${statusText}`;
   elDataDate.className = statusClass;
 
-  // 同時更新頁尾的資料期間（歷史回測）
   const elHistoryRange = document.getElementById('historyDateRange');
   if (elHistoryRange) {
-    const usedDays = candles.length;
-    const totalDays = originalLength;
-    elHistoryRange.textContent = `資料期間：${firstDateStr} ~ ${lastDateStr}（共 ${usedDays} 筆 / 原始 ${totalDays} 筆，近 1 年過濾）`;
+    elHistoryRange.textContent = `資料期間：${firstDateStr} ~ ${lastDateStr}（共 ${candles.length} 筆 / 原始 ${originalLength} 筆，近 1 年過濾）`;
   }
 }
 
-/**
- * 1. 渲染股票名稱、股價與成交量（當日資料）
- */
 function renderHeaderAndStockInfo(code, name, candles) {
   const last = candles[candles.length - 1];
   const prev = candles[candles.length - 2] || last;
@@ -189,7 +164,6 @@ function renderHeaderAndStockInfo(code, name, candles) {
     elPrice.textContent = `NT$ ${last.close.toFixed(2)} (${isUp ? '+' : ''}${pricePct}%)`;
   }
 
-  // 價格日期提示
   const elPriceDateHint = document.getElementById('priceDateHint');
   if (elPriceDateHint) {
     elPriceDateHint.textContent = `（遇非交易日顯示前一交易日，收盤日：${last.date}）`;
@@ -201,16 +175,12 @@ function renderHeaderAndStockInfo(code, name, candles) {
     elVolume.textContent = `${volInLots.toLocaleString()} 張`;
   }
 
-  // 成交量日期提示
   const elVolumeDateHint = document.getElementById('volumeDateHint');
   if (elVolumeDateHint) {
     elVolumeDateHint.textContent = `（遇非交易日顯示前一交易日，收盤日：${last.date}）`;
   }
 }
 
-/**
- * 2. 渲染當前系統決策訊號（雙倉：核心 → 戰術）
- */
 function renderSignalBadge(candles) {
   const idx = candles.length - 1;
   const last = candles[idx];
@@ -227,7 +197,6 @@ function renderSignalBadge(candles) {
     return;
   }
 
-  // 依序檢查兩倉：核心 → 戰術
   const coreDecision = engine.evaluateEntrySignal(candles, idx, 'core');
   const tacDecision = engine.evaluateEntrySignal(candles, idx, 'tactical');
 
@@ -278,9 +247,6 @@ function renderSignalBadge(candles) {
   elDesc.textContent = `當前 SDV ${Math.round(sdv)}，系統持續監控核心倉與戰術倉訊號。`;
 }
 
-/**
- * 3. 渲染 4 大指標 T-Score 卡片（當日）
- */
 function renderTScoreCards(candles) {
   const last = candles[candles.length - 1];
 
@@ -321,9 +287,6 @@ function renderTScoreCards(candles) {
   updateCard('bdvValue', 'bdvStatus', last.bdv, 65, 35);
 }
 
-/**
- * 4. 渲染 ADV 動態移動風控樞紐（當日）
- */
 function renderAdvRiskHub(candles) {
   const last = candles[candles.length - 1];
   const prev = candles[candles.length - 2] || last;
@@ -386,9 +349,6 @@ function renderAdvRiskHub(candles) {
   }
 }
 
-/**
- * 5. 渲染多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)（當日）
- */
 function renderDeltaMatrix(candles) {
   const tbody = document.getElementById('deltaMatrixBody');
   if (!tbody) return;
@@ -433,94 +393,194 @@ function renderDeltaMatrix(candles) {
 }
 
 /**
- * 6. 渲染歷史交易紀錄表（歷史回測：近 1 年 / 250 交易日）
+ * 渲染歷史交易紀錄表（流水帳檢視 + 配對檢視）
+ * 流水帳列順序：交易日期 | 價格 | 訊號 | 動作 | 張數 | 資金池 | 報酬
  */
 function renderHistoryTable(trades, dataLength, backtestResult) {
   const tbody = document.getElementById('historyTableBody');
   const summaryEl = document.getElementById('historySummary');
+  const toggleEl = document.getElementById('viewToggle');
   if (!tbody) return;
 
-  tbody.innerHTML = '';
+  const transactionLog = backtestResult.transactionLog || [];
+  let currentView = 'log';
 
-  if (dataLength < 58) {
-    tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-amber-400 text-center font-sans">
-      ⚠️ 數據不足（目前 ${dataLength} 天，至少需 58 天方能計算指標與回測）
-    </td></tr>`;
-    if (summaryEl) summaryEl.textContent = `數據長度 ${dataLength} 天，不足以產生交易訊號`;
-    return;
-  }
-
-  if (!trades || trades.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-slate-500 text-center font-sans">
-      近 1 年內無符合之進場訊號（指標暖機完成後仍未觸發）
-    </td></tr>`;
-    if (summaryEl) summaryEl.textContent = `數據 ${dataLength} 天，無觸發紀錄`;
-    return;
-  }
-
-  // 加權總報酬（85/15）
-  if (summaryEl && backtestResult) {
-    const wins = trades.filter(t => t.pnlPct > 0).length;
-    const winRate = Math.round((wins / trades.length) * 100);
-    const p = backtestResult.pools || {};
-
-    const coreRet = p['核心倉']?.returnPct ?? 0;
-    const tacRet = p['戰術倉']?.returnPct ?? 0;
-
-    const weighted = coreRet * 0.85 + tacRet * 0.15;
-
-    summaryEl.innerHTML = `
-      共 ${trades.length} 筆 | 勝率 ${winRate}% (${wins}勝/${trades.length - wins}敗) |
-      核心倉 <span class="${coreRet >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${coreRet >= 0 ? '+' : ''}${coreRet}%</span> |
-      戰術倉 <span class="${tacRet >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${tacRet >= 0 ? '+' : ''}${tacRet}%</span> |
-      加權總報酬 <strong class="${weighted >= 0 ? 'text-emerald-300' : 'text-rose-300'}">${weighted >= 0 ? '+' : ''}${weighted.toFixed(2)}%</strong>
+  // 建立切換按鈕
+  if (toggleEl) {
+    toggleEl.innerHTML = `
+      <button onclick="switchView('log')" id="btnLog"
+        class="px-3 py-1 rounded text-xs font-bold bg-amber-500 text-white">📅 流水帳檢視</button>
+      <button onclick="switchView('paired')" id="btnPaired"
+        class="px-3 py-1 rounded text-xs font-bold bg-slate-700 text-slate-300">🔗 配對檢視</button>
     `;
   }
 
-  trades.forEach(t => {
-    const row = document.createElement('tr');
-    row.className = 'border-b border-slate-700/40 hover:bg-slate-800/60 transition';
+  window.switchView = function(view) {
+    currentView = view;
+    const btnLog = document.getElementById('btnLog');
+    const btnPaired = document.getElementById('btnPaired');
+    if (view === 'log') {
+      if (btnLog) btnLog.className = 'px-3 py-1 rounded text-xs font-bold bg-amber-500 text-white';
+      if (btnPaired) btnPaired.className = 'px-3 py-1 rounded text-xs font-bold bg-slate-700 text-slate-300';
+    } else {
+      if (btnLog) btnLog.className = 'px-3 py-1 rounded text-xs font-bold bg-slate-700 text-slate-300';
+      if (btnPaired) btnPaired.className = 'px-3 py-1 rounded text-xs font-bold bg-amber-500 text-white';
+    }
+    renderTableBody();
+  };
 
-    const isProfit = t.pnlPct > 0;
-    const pnlBadge = `<span class="text-xs px-2 py-0.5 rounded ${isProfit ? 'bg-emerald-950 text-emerald-400 border border-emerald-700/50' : 'bg-rose-950 text-rose-400 border border-rose-700/50'}">
-      ${isProfit ? '+' : ''}${t.pnlPct}%
-    </span>`;
+  function renderTableBody() {
+    tbody.innerHTML = '';
 
-    const trackBadge = t.track ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">軌${t.track}</span>` : '';
+    if (dataLength < 58) {
+      tbody.innerHTML = `<tr><td colspan="7" class="p-6 text-amber-400 text-center font-sans">
+        ⚠️ 數據不足（目前 ${dataLength} 天，至少需 58 天方能計算指標與回測）
+      </td></tr>`;
+      if (summaryEl) summaryEl.textContent = `數據長度 ${dataLength} 天，不足以產生交易訊號`;
+      return;
+    }
 
-    const gradeColor = t.grade === 'A' ? 'bg-emerald-900 text-emerald-300'
-      : t.grade === 'B' ? 'bg-sky-900 text-sky-300'
-      : t.grade === 'S' ? 'bg-purple-900 text-purple-300'
-      : t.grade === 'T' ? 'bg-rose-900 text-rose-300'
-      : 'bg-amber-900 text-amber-300';
-    const gradeBadge = t.grade ? `<span class="text-[10px] px-1.5 py-0.5 rounded ${gradeColor}">${t.grade}級</span>` : '';
+    // ===== 流水帳檢視 =====
+    if (currentView === 'log') {
+      if (!transactionLog || transactionLog.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="p-6 text-slate-500 text-center font-sans">
+          近 1 年內無交易動作
+        </td></tr>`;
+        if (summaryEl) summaryEl.textContent = `數據 ${dataLength} 天，無觸發紀錄`;
+        return;
+      }
 
-    const addMark = t.addCount > 0 ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-950 text-amber-300">+${t.addCount}</span>` : '';
+      // 摘要
+      if (summaryEl && backtestResult) {
+        const wins = trades.filter(t => t.pnlPct > 0).length;
+        const winRate = trades.length > 0 ? Math.round((wins / trades.length) * 100) : 0;
+        const p = backtestResult.pools || {};
+        const coreRet = p['核心倉']?.returnPct ?? 0;
+        const tacRet = p['戰術倉']?.returnPct ?? 0;
+        const weighted = coreRet * 0.85 + tacRet * 0.15;
+        summaryEl.innerHTML = `
+          共 ${trades.length} 筆完整交易 | 勝率 ${winRate}% (${wins}勝/${trades.length - wins}敗) |
+          核心倉 <span class="${coreRet >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${coreRet >= 0 ? '+' : ''}${coreRet}%</span> |
+          戰術倉 <span class="${tacRet >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${tacRet >= 0 ? '+' : ''}${tacRet}%</span> |
+          加權總報酬 <strong class="${weighted >= 0 ? 'text-emerald-300' : 'text-rose-300'}">${weighted >= 0 ? '+' : ''}${weighted.toFixed(2)}%</strong>
+        `;
+      }
 
-    const poolBadge = t.pool ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-600">${t.pool}</span>` : '';
+      transactionLog.forEach(tx => {
+        const row = document.createElement('tr');
+        row.className = 'border-b border-slate-700/40 hover:bg-slate-800/60 transition';
 
-    const partialMark = t.partial ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300">${t.partialCount}段</span>` : '';
+        // 動作樣式
+        let actionBadge;
+        if (tx.action === 'BUY') {
+          actionBadge = `<span class="text-xs px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-700/50">🟢 買入</span>`;
+        } else if (tx.action === 'SELL') {
+          actionBadge = `<span class="text-xs px-2 py-0.5 rounded bg-rose-950 text-rose-400 border border-rose-700/50">🔴 ${tx.actionLabel}</span>`;
+        } else if (tx.action === 'ADD') {
+          actionBadge = `<span class="text-xs px-2 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-700/50">➕ ${tx.actionLabel}</span>`;
+        }
 
-    row.innerHTML = `
-      <td class="p-3 text-slate-300">${t.buyDate}</td>
-      <td class="p-3 text-slate-200">NT$ ${t.buyPrice.toFixed(2)}</td>
-      <td class="p-3 text-sky-400 font-medium border-r border-slate-700/60">
-        <div class="flex items-center justify-center gap-1 flex-wrap">
-          ${poolBadge}${trackBadge}${gradeBadge}
-          <span class="text-xs">${t.buySignal}</span>
-          ${addMark}
-        </div>
-      </td>
-      <td class="p-3 text-slate-300">${t.sellDate}</td>
-      <td class="p-3 text-slate-200">NT$ ${t.sellPrice.toFixed(2)}</td>
-      <td class="p-3">
-        <div class="flex items-center justify-center gap-2">
-          ${pnlBadge}
-          ${partialMark}
-          <span class="text-xs text-slate-400">${t.sellReason}</span>
-        </div>
-      </td>
-    `;
-    tbody.appendChild(row);
-  });
+        // 資金池
+        const poolBadge = tx.pool ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-600">${tx.pool}</span>` : '';
+
+        // 訊號
+        let signalInfo = '';
+        if (tx.action === 'BUY') {
+          const gradeColor = tx.signalInfo?.includes('A級') ? 'text-emerald-400'
+            : tx.signalInfo?.includes('B級') ? 'text-sky-400'
+            : tx.signalInfo?.includes('S級') ? 'text-purple-400'
+            : tx.signalInfo?.includes('T級') ? 'text-rose-400'
+            : 'text-amber-400';
+          signalInfo = `<span class="text-xs ${gradeColor}">${tx.signalInfo}</span>`;
+        } else if (tx.action === 'SELL') {
+          signalInfo = `<span class="text-xs text-slate-400">${tx.reason}</span>`;
+        } else {
+          signalInfo = `<span class="text-xs text-amber-400">${tx.signalInfo}</span>`;
+        }
+
+        // 張數
+        const lotsDisplay = tx.lots !== undefined ? tx.lots.toFixed(0) + ' 張' : Math.round(tx.shares / 1000) + ' 張';
+
+        // 報酬
+        let returnDisplay = '<span class="text-slate-500">--</span>';
+        if (tx.action === 'SELL' || tx.action === 'ADD') {
+          const isProfit = tx.returnPct > 0;
+          const returnColor = isProfit ? 'text-emerald-400' : 'text-rose-400';
+          returnDisplay = `<span class="${returnColor} font-bold">${tx.returnPct >= 0 ? '+' : ''}${tx.returnPct.toFixed(2)}%</span>`;
+        } else if (tx.action === 'BUY') {
+          returnDisplay = '<span class="text-slate-500">--</span>';
+        }
+
+        row.innerHTML = `
+          <td class="p-3 text-slate-300 font-mono">${tx.date}</td>
+          <td class="p-3 text-slate-200 font-mono text-right">NT$ ${tx.price.toFixed(2)}</td>
+          <td class="p-3 text-center">${signalInfo}</td>
+          <td class="p-3 text-center">${actionBadge}</td>
+          <td class="p-3 text-slate-200 font-mono text-right">${lotsDisplay}</td>
+          <td class="p-3 text-center">${poolBadge}</td>
+          <td class="p-3 text-right">${returnDisplay}</td>
+        `;
+        tbody.appendChild(row);
+      });
+
+    } else {
+      // ===== 配對檢視 =====
+      if (!trades || trades.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="p-6 text-slate-500 text-center font-sans">
+          近 1 年內無符合之進場訊號
+        </td></tr>`;
+        return;
+      }
+
+      if (summaryEl && backtestResult) {
+        const wins = trades.filter(t => t.pnlPct > 0).length;
+        const winRate = Math.round((wins / trades.length) * 100);
+        const p = backtestResult.pools || {};
+        const coreRet = p['核心倉']?.returnPct ?? 0;
+        const tacRet = p['戰術倉']?.returnPct ?? 0;
+        const weighted = coreRet * 0.85 + tacRet * 0.15;
+        summaryEl.innerHTML = `
+          共 ${trades.length} 筆 | 勝率 ${winRate}% (${wins}勝/${trades.length - wins}敗) |
+          核心倉 <span class="${coreRet >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${coreRet >= 0 ? '+' : ''}${coreRet}%</span> |
+          戰術倉 <span class="${tacRet >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${tacRet >= 0 ? '+' : ''}${tacRet}%</span> |
+          加權總報酬 <strong class="${weighted >= 0 ? 'text-emerald-300' : 'text-rose-300'}">${weighted >= 0 ? '+' : ''}${weighted.toFixed(2)}%</strong>
+        `;
+      }
+
+      trades.forEach(t => {
+        const row = document.createElement('tr');
+        row.className = 'border-b border-slate-700/40 hover:bg-slate-800/60 transition';
+
+        const isProfit = t.pnlPct > 0;
+        const returnDisplay = `<span class="${isProfit ? 'text-emerald-400' : 'text-rose-400'} font-bold">${isProfit ? '+' : ''}${t.pnlPct.toFixed(2)}%</span>`;
+
+        const trackBadge = t.track ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">軌${t.track}</span>` : '';
+        const gradeColor = t.grade === 'A' ? 'text-emerald-400'
+          : t.grade === 'B' ? 'text-sky-400'
+          : t.grade === 'S' ? 'text-purple-400'
+          : t.grade === 'T' ? 'text-rose-400'
+          : 'text-amber-400';
+        const gradeBadge = t.grade ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 ${gradeColor}">${t.grade}級</span>` : '';
+        const poolBadge = t.pool ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-600">${t.pool}</span>` : '';
+
+        row.innerHTML = `
+          <td class="p-3 text-slate-300 font-mono">${t.buyDate} → ${t.sellDate}</td>
+          <td class="p-3 text-slate-200 font-mono text-right">${t.buyPrice.toFixed(2)} → ${t.sellPrice.toFixed(2)}</td>
+          <td class="p-3 text-center">
+            ${trackBadge}${gradeBadge}
+            <span class="text-xs text-sky-400">${t.buySignal}</span>
+          </td>
+          <td class="p-3 text-center">
+            <span class="text-xs px-2 py-0.5 rounded bg-sky-950 text-sky-400 border border-sky-700/50">🔵 買賣</span>
+          </td>
+          <td class="p-3 text-slate-200 font-mono text-right">${Math.round(t.addCount)} 次加碼</td>
+          <td class="p-3 text-center">${poolBadge}</td>
+          <td class="p-3 text-right">${returnDisplay}</td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+  }
+
+  renderTableBody();
 }
