@@ -1,16 +1,11 @@
 /**
- * main.js - 四指標趨勢分析 UI 控制器 (v11.2.0 方案D定版)
+ * main.js - 四指標趨勢分析 UI 控制器
  * 
  * ========== 核心設計 ==========
  * - 資金配置：核心倉 85% / 戰術倉 15% / 機動倉取消
- * - 資料日期一致性：頁首顯示資料截止日，頁尾顯示回測期間
- * - 延遲提示：資料延遲 > 3 天顯示警示
- * 
- * ========== 修正記錄 ==========
- * - P0-1：動能轉弱需連續 2 日（已於 quantEngine.js）
- * - P0-2：核心倉賣出當日，戰術倉禁止進場（已於 quantEngine.js）
- * - UI 修正：即時股價 → 最新收盤價，明確標示資料日期
- * - UI 修正：歷史紀錄改為動態日期範圍
+ * - 當日分析：頁首、四指標、ADV 風控、Δ 動能矩陣
+ * - 歷史回測：頁尾歷史系統決策訊號紀錄（近 1 年 / 250 交易日）
+ * - 遇非交易日，當日分析使用前一個交易日資料
  */
 
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbyP4to4WeWt17kngG-5UpKIMPz3Mp3tKfzVt6mNBfOQkEuyGQK0rUNxyJHz1jo2_8Iz/exec";
@@ -38,7 +33,7 @@ async function analyzeStock() {
     elDesc.className = 'text-sm text-amber-400 font-medium animate-pulse mt-3 leading-relaxed';
   }
   if (elDataDate) {
-    elDataDate.textContent = '📅 資料截止日：載入中...';
+    elDataDate.textContent = '📅 當日資料截止：載入中...';
     elDataDate.className = 'text-xs text-amber-400 mt-1';
   }
 
@@ -72,7 +67,7 @@ async function analyzeStock() {
       throw new Error(`數據長度僅 ${candles.length} 天，不足 48 天指標暖機門檻`);
     }
 
-    // 【新增】渲染資料日期資訊
+    // 【新增】渲染當日資料日期資訊（頁首）
     renderDataDateInfo(candles, originalLength, stockCode);
 
     const processedCandles = engine.calculateIndicators(candles);
@@ -92,7 +87,7 @@ async function analyzeStock() {
       elDesc.className = 'text-sm text-rose-400 font-semibold mt-3 leading-relaxed';
     }
     if (elDataDate) {
-      elDataDate.textContent = '📅 資料截止日：取得失敗';
+      elDataDate.textContent = '📅 當日資料截止：取得失敗';
       elDataDate.className = 'text-xs text-rose-400 mt-1';
     }
   }
@@ -113,7 +108,9 @@ function normalizeCandleData(data) {
 }
 
 /**
- * 【新增】渲染資料日期資訊（頁首顯示資料截止日，頁尾顯示回測期間）
+ * 【新增】渲染資料日期資訊
+ * - 頁首：當日資料截止（如遇非交易日，顯示前一交易日）
+ * - 頁尾：歷史回測期間
  */
 function renderDataDateInfo(candles, originalLength, stockCode) {
   const elDataDate = document.getElementById('dataDateInfo');
@@ -124,30 +121,41 @@ function renderDataDateInfo(candles, originalLength, stockCode) {
   const lastDate = new Date(lastDateStr);
   const today = new Date();
 
-  // 計算延遲天數（以日曆天為基準）
+  // 判斷今天是否為交易日（簡易判斷：週一至週五）
+  const dayOfWeek = today.getDay();
+  const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+
+  // 計算延遲天數
   const dayDiff = Math.floor((today - lastDate) / (1000 * 60 * 60 * 24));
 
-  let delayText = '';
-  let delayClass = 'text-xs text-emerald-400 mt-1';
+  // 判斷是否為當日資料
+  let statusText = '';
+  let statusClass = 'text-xs text-emerald-400 mt-1';
 
-  if (dayDiff <= 1) {
-    delayText = '（盤後資料，正常）';
-    delayClass = 'text-xs text-emerald-400 mt-1';
+  if (dayDiff === 0) {
+    statusText = '（當日資料）';
+    statusClass = 'text-xs text-emerald-400 mt-1';
+  } else if (dayDiff === 1 && isWeekend) {
+    statusText = '（非交易日，顯示前一交易日）';
+    statusClass = 'text-xs text-sky-400 mt-1';
+  } else if (dayDiff === 1) {
+    statusText = '（盤後資料，正常）';
+    statusClass = 'text-xs text-emerald-400 mt-1';
   } else if (dayDiff <= 3) {
-    delayText = `（延遲 ${dayDiff} 天，含週末正常）`;
-    delayClass = 'text-xs text-emerald-400 mt-1';
+    statusText = `（非交易日，顯示前一交易日，延遲 ${dayDiff} 天）`;
+    statusClass = 'text-xs text-sky-400 mt-1';
   } else if (dayDiff <= 5) {
-    delayText = `（延遲 ${dayDiff} 天，請確認是否休市）`;
-    delayClass = 'text-xs text-amber-400 mt-1';
+    statusText = `（延遲 ${dayDiff} 天，請確認是否休市）`;
+    statusClass = 'text-xs text-amber-400 mt-1';
   } else {
-    delayText = `（延遲 ${dayDiff} 天，可能有異常）`;
-    delayClass = 'text-xs text-rose-400 mt-1';
+    statusText = `（延遲 ${dayDiff} 天，可能有異常）`;
+    statusClass = 'text-xs text-rose-400 mt-1';
   }
 
-  elDataDate.textContent = `📅 資料截止日：${lastDateStr} ${delayText}`;
-  elDataDate.className = delayClass;
+  elDataDate.textContent = `📅 當日資料截止：${lastDateStr} ${statusText}`;
+  elDataDate.className = statusClass;
 
-  // 同時更新頁尾的資料期間
+  // 同時更新頁尾的資料期間（歷史回測）
   const elHistoryRange = document.getElementById('historyDateRange');
   if (elHistoryRange) {
     const usedDays = candles.length;
@@ -157,7 +165,7 @@ function renderDataDateInfo(candles, originalLength, stockCode) {
 }
 
 /**
- * 1. 渲染股票名稱、股價與成交量（含資料日期）
+ * 1. 渲染股票名稱、股價與成交量（當日資料）
  */
 function renderHeaderAndStockInfo(code, name, candles) {
   const last = candles[candles.length - 1];
@@ -184,7 +192,7 @@ function renderHeaderAndStockInfo(code, name, candles) {
   // 價格日期提示
   const elPriceDateHint = document.getElementById('priceDateHint');
   if (elPriceDateHint) {
-    elPriceDateHint.textContent = `收盤日：${last.date}`;
+    elPriceDateHint.textContent = `（遇非交易日顯示前一交易日，收盤日：${last.date}）`;
   }
 
   const elVolume = document.getElementById('stockVolume');
@@ -196,7 +204,7 @@ function renderHeaderAndStockInfo(code, name, candles) {
   // 成交量日期提示
   const elVolumeDateHint = document.getElementById('volumeDateHint');
   if (elVolumeDateHint) {
-    elVolumeDateHint.textContent = `收盤日：${last.date}`;
+    elVolumeDateHint.textContent = `（遇非交易日顯示前一交易日，收盤日：${last.date}）`;
   }
 }
 
@@ -271,7 +279,7 @@ function renderSignalBadge(candles) {
 }
 
 /**
- * 3. 渲染 4 大指標 T-Score 卡片
+ * 3. 渲染 4 大指標 T-Score 卡片（當日）
  */
 function renderTScoreCards(candles) {
   const last = candles[candles.length - 1];
@@ -314,7 +322,7 @@ function renderTScoreCards(candles) {
 }
 
 /**
- * 4. 渲染 ADV 動態移動風控樞紐
+ * 4. 渲染 ADV 動態移動風控樞紐（當日）
  */
 function renderAdvRiskHub(candles) {
   const last = candles[candles.length - 1];
@@ -379,7 +387,7 @@ function renderAdvRiskHub(candles) {
 }
 
 /**
- * 5. 渲染多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)
+ * 5. 渲染多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)（當日）
  */
 function renderDeltaMatrix(candles) {
   const tbody = document.getElementById('deltaMatrixBody');
@@ -425,7 +433,7 @@ function renderDeltaMatrix(candles) {
 }
 
 /**
- * 6. 渲染歷史交易紀錄表（雙倉 + 加權總報酬 85/15）
+ * 6. 渲染歷史交易紀錄表（歷史回測：近 1 年 / 250 交易日）
  */
 function renderHistoryTable(trades, dataLength, backtestResult) {
   const tbody = document.getElementById('historyTableBody');
