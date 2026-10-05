@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>台股實時四指標與系統決策矩陣 (v11.0 日線級高頻高報酬版)</title>
+    <title>台股四指標與系統決策矩陣</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen p-4 md:p-8">
@@ -13,8 +13,9 @@
         <!-- Header & 搜尋欄 -->
         <header class="flex flex-col md:flex-row justify-between items-center bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg gap-4">
             <div>
-                <h1 class="text-2xl font-bold text-sky-400">台股實時四指標與系統決策矩陣 <span class="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded">v11.0</span></h1>
-                <p class="text-sm text-slate-400 mt-1">對數標準化 T-Score + Δ動能 + 四軌進場 + 五層出場 + 三層資金架構 (60/25/15) + 12個月歷史追蹤</p>
+                <h1 class="text-2xl font-bold text-sky-400">台股四指標與系統決策矩陣</h1>
+                <p class="text-sm text-slate-400 mt-1">對數標準化 T-Score + Δ動能 + 四軌進場 + 五層出場 + 雙倉資金架構 (85/15)</p>
+                <p id="dataDateInfo" class="text-xs text-amber-400 mt-1">📅 資料截止日：載入中...</p>
             </div>
 
             <div class="flex items-center space-x-2 w-full md:w-auto">
@@ -22,7 +23,7 @@
                        class="bg-slate-900 border border-slate-600 px-4 py-2 rounded-lg text-white font-mono focus:outline-none focus:border-sky-500 w-full md:w-48">
                 <button onclick="analyzeStock()"
                         class="bg-sky-600 hover:bg-sky-500 px-6 py-2 rounded-lg font-bold transition text-white whitespace-nowrap">
-                    實時分析
+                    分析
                 </button>
             </div>
         </header>
@@ -39,17 +40,19 @@
                 <p id="decisionDesc" class="text-sm text-slate-400 mt-3 leading-relaxed">正在讀取量化引擎數據...</p>
             </div>
 
-            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between items-center text-center shadow-lg">
-                <div id="priceLabel" class="text-sm font-bold text-slate-400 mb-1">即時股價 (T / T-1)</div>
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
+                <div id="priceLabel" class="text-sm font-bold text-slate-400 mb-1">最新收盤價（資料截止日）</div>
                 <div id="stockPrice" class="text-2xl md:text-3xl font-extrabold font-mono text-emerald-400">NT$ --</div>
+                <div id="priceDateHint" class="text-xs text-slate-500 mt-1">--</div>
             </div>
 
-            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between items-center text-center shadow-lg">
-                <div id="volumeLabel" class="text-sm font-bold text-slate-400 mb-1">即時成交量 (T / T-1)</div>
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
+                <div id="volumeLabel" class="text-sm font-bold text-slate-400 mb-1">最新成交量（資料截止日）</div>
                 <div id="stockVolume" class="text-2xl md:text-3xl font-extrabold font-mono text-sky-400">-- 張</div>
+                <div id="volumeDateHint" class="text-xs text-slate-500 mt-1">--</div>
             </div>
 
-            <div id="cardSignal" class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between items-center text-center shadow-lg">
+            <div id="cardSignal" class="bg-slate-800 p-5 rounded-xl border border-slate-700 flex flex-col justify-between shadow-lg">
                 <div class="text-sm font-bold text-slate-400 mb-1">當前系統決策訊號</div>
                 <div id="signalBadge" class="inline-block mt-2 px-3 py-2 rounded-md font-bold text-sm bg-slate-700 text-slate-300 text-center">
                     等待分析
@@ -132,7 +135,8 @@
         <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg space-y-4">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-700 pb-3 gap-2">
                 <div>
-                    <h3 class="text-lg font-bold text-amber-400">📜 歷史系統決策訊號紀錄 (近 1 年 / 250 交易日)</h3>
+                    <h3 class="text-lg font-bold text-amber-400">📜 歷史系統決策訊號紀錄</h3>
+                    <p id="historyDateRange" class="text-xs text-slate-400 mt-1">資料期間：載入中...</p>
                     <p id="historySummary" class="text-xs text-slate-400 mt-1">等待數據加載中...</p>
                 </div>
                 <span class="text-xs px-2.5 py-1 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">系統歷史檢驗</span>
@@ -142,8 +146,8 @@
                 <table class="w-full text-center text-sm border-collapse">
                     <thead class="sticky top-0 bg-slate-900 border-b border-slate-700">
                         <tr class="text-xs uppercase tracking-wider text-slate-400 border-b border-slate-800">
-                            <th colspan="3" class="p-2 bg-emerald-950/40 text-emerald-400 border-r border-slate-700">買入決策紀錄</th>
-                            <th colspan="3" class="p-2 bg-rose-950/40 text-rose-400">賣出決策紀錄</th>
+                            <th colspan="3" class="p-2 bg-emerald-950/40 text-emerald-400 border-r border-slate-700">買入交易紀錄</th>
+                            <th colspan="3" class="p-2 bg-rose-950/40 text-rose-400">賣出交易紀錄</th>
                         </tr>
                         <tr class="text-slate-300">
                             <th class="p-3 font-semibold">交易日期</th>
@@ -155,7 +159,7 @@
                         </tr>
                     </thead>
                     <tbody id="historyTableBody" class="divide-y divide-slate-700/50 font-mono">
-                        <tr><td colspan="6" class="p-4 text-slate-500 text-center font-sans">點擊「實時分析」進行動態計算...</td></tr>
+                        <tr><td colspan="6" class="p-4 text-slate-500 text-center font-sans">點擊「分析」進行動態計算...</td></tr>
                     </tbody>
                 </table>
             </div>

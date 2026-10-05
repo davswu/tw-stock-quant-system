@@ -1,6 +1,16 @@
 /**
  * main.js - 四指標趨勢分析 UI 控制器 (v11.2.0 方案D定版)
- * 資金配置：核心 85% / 戰術 15% / 機動倉取消
+ * 
+ * ========== 核心設計 ==========
+ * - 資金配置：核心倉 85% / 戰術倉 15% / 機動倉取消
+ * - 資料日期一致性：頁首顯示資料截止日，頁尾顯示回測期間
+ * - 延遲提示：資料延遲 > 3 天顯示警示
+ * 
+ * ========== 修正記錄 ==========
+ * - P0-1：動能轉弱需連續 2 日（已於 quantEngine.js）
+ * - P0-2：核心倉賣出當日，戰術倉禁止進場（已於 quantEngine.js）
+ * - UI 修正：即時股價 → 最新收盤價，明確標示資料日期
+ * - UI 修正：歷史紀錄改為動態日期範圍
  */
 
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbyP4to4WeWt17kngG-5UpKIMPz3Mp3tKfzVt6mNBfOQkEuyGQK0rUNxyJHz1jo2_8Iz/exec";
@@ -14,14 +24,22 @@ document.addEventListener('DOMContentLoaded', () => {
   analyzeStock();
 });
 
+/**
+ * 主分析進入點
+ */
 async function analyzeStock() {
   const elStockInput = document.getElementById('stockInput');
   const elDesc = document.getElementById('decisionDesc');
+  const elDataDate = document.getElementById('dataDateInfo');
   const stockCode = elStockInput ? elStockInput.value.trim() || '2330' : '2330';
 
   if (elDesc) {
     elDesc.textContent = `⏳ 正連線 GAS API 抓取 [${stockCode}] 行情數據中...`;
     elDesc.className = 'text-sm text-amber-400 font-medium animate-pulse mt-3 leading-relaxed';
+  }
+  if (elDataDate) {
+    elDataDate.textContent = '📅 資料截止日：載入中...';
+    elDataDate.className = 'text-xs text-amber-400 mt-1';
   }
 
   try {
@@ -41,6 +59,7 @@ async function analyzeStock() {
     }
 
     let candles = normalizeCandleData(rawCandles);
+    const originalLength = candles.length;
 
     if (ENABLE_ONE_YEAR_FILTER && candles.length > 0) {
       const lastDate = new Date(candles[candles.length - 1].date);
@@ -52,6 +71,9 @@ async function analyzeStock() {
     if (candles.length < 48) {
       throw new Error(`數據長度僅 ${candles.length} 天，不足 48 天指標暖機門檻`);
     }
+
+    // 【新增】渲染資料日期資訊
+    renderDataDateInfo(candles, originalLength, stockCode);
 
     const processedCandles = engine.calculateIndicators(candles);
     const backtestResult = engine.runFullCompoundBacktest(candles, 100000, processedCandles);
@@ -69,9 +91,16 @@ async function analyzeStock() {
       elDesc.textContent = `❌ 連線/處理失敗：${error.message}`;
       elDesc.className = 'text-sm text-rose-400 font-semibold mt-3 leading-relaxed';
     }
+    if (elDataDate) {
+      elDataDate.textContent = '📅 資料截止日：取得失敗';
+      elDataDate.className = 'text-xs text-rose-400 mt-1';
+    }
   }
 }
 
+/**
+ * 資料清洗與轉換
+ */
 function normalizeCandleData(data) {
   return data.map(item => ({
     date: item.date ?? item.Date ?? item.time ?? '',
@@ -83,6 +112,53 @@ function normalizeCandleData(data) {
   })).filter(c => c.close > 0 && c.date !== '');
 }
 
+/**
+ * 【新增】渲染資料日期資訊（頁首顯示資料截止日，頁尾顯示回測期間）
+ */
+function renderDataDateInfo(candles, originalLength, stockCode) {
+  const elDataDate = document.getElementById('dataDateInfo');
+  if (!elDataDate || candles.length === 0) return;
+
+  const lastDateStr = candles[candles.length - 1].date;
+  const firstDateStr = candles[0].date;
+  const lastDate = new Date(lastDateStr);
+  const today = new Date();
+
+  // 計算延遲天數（以日曆天為基準）
+  const dayDiff = Math.floor((today - lastDate) / (1000 * 60 * 60 * 24));
+
+  let delayText = '';
+  let delayClass = 'text-xs text-emerald-400 mt-1';
+
+  if (dayDiff <= 1) {
+    delayText = '（盤後資料，正常）';
+    delayClass = 'text-xs text-emerald-400 mt-1';
+  } else if (dayDiff <= 3) {
+    delayText = `（延遲 ${dayDiff} 天，含週末正常）`;
+    delayClass = 'text-xs text-emerald-400 mt-1';
+  } else if (dayDiff <= 5) {
+    delayText = `（延遲 ${dayDiff} 天，請確認是否休市）`;
+    delayClass = 'text-xs text-amber-400 mt-1';
+  } else {
+    delayText = `（延遲 ${dayDiff} 天，可能有異常）`;
+    delayClass = 'text-xs text-rose-400 mt-1';
+  }
+
+  elDataDate.textContent = `📅 資料截止日：${lastDateStr} ${delayText}`;
+  elDataDate.className = delayClass;
+
+  // 同時更新頁尾的資料期間
+  const elHistoryRange = document.getElementById('historyDateRange');
+  if (elHistoryRange) {
+    const usedDays = candles.length;
+    const totalDays = originalLength;
+    elHistoryRange.textContent = `資料期間：${firstDateStr} ~ ${lastDateStr}（共 ${usedDays} 筆 / 原始 ${totalDays} 筆，近 1 年過濾）`;
+  }
+}
+
+/**
+ * 1. 渲染股票名稱、股價與成交量（含資料日期）
+ */
 function renderHeaderAndStockInfo(code, name, candles) {
   const last = candles[candles.length - 1];
   const prev = candles[candles.length - 2] || last;
@@ -95,7 +171,7 @@ function renderHeaderAndStockInfo(code, name, candles) {
   if (elTitle) {
     elTitle.innerHTML = `
       <span class="text-2xl font-extrabold text-white">${code} ${name}</span>
-      <span class="text-sm text-slate-300 font-normal mt-1">最新數據日期：${last.date}</span>
+      <span class="text-sm text-slate-300 font-normal mt-1">資料截止：${last.date}</span>
     `;
   }
 
@@ -105,13 +181,28 @@ function renderHeaderAndStockInfo(code, name, candles) {
     elPrice.textContent = `NT$ ${last.close.toFixed(2)} (${isUp ? '+' : ''}${pricePct}%)`;
   }
 
+  // 價格日期提示
+  const elPriceDateHint = document.getElementById('priceDateHint');
+  if (elPriceDateHint) {
+    elPriceDateHint.textContent = `收盤日：${last.date}`;
+  }
+
   const elVolume = document.getElementById('stockVolume');
   if (elVolume) {
     const volInLots = Math.round(last.volume / 1000);
     elVolume.textContent = `${volInLots.toLocaleString()} 張`;
   }
+
+  // 成交量日期提示
+  const elVolumeDateHint = document.getElementById('volumeDateHint');
+  if (elVolumeDateHint) {
+    elVolumeDateHint.textContent = `收盤日：${last.date}`;
+  }
 }
 
+/**
+ * 2. 渲染當前系統決策訊號（雙倉：核心 → 戰術）
+ */
 function renderSignalBadge(candles) {
   const idx = candles.length - 1;
   const last = candles[idx];
@@ -179,6 +270,9 @@ function renderSignalBadge(candles) {
   elDesc.textContent = `當前 SDV ${Math.round(sdv)}，系統持續監控核心倉與戰術倉訊號。`;
 }
 
+/**
+ * 3. 渲染 4 大指標 T-Score 卡片
+ */
 function renderTScoreCards(candles) {
   const last = candles[candles.length - 1];
 
@@ -219,6 +313,9 @@ function renderTScoreCards(candles) {
   updateCard('bdvValue', 'bdvStatus', last.bdv, 65, 35);
 }
 
+/**
+ * 4. 渲染 ADV 動態移動風控樞紐
+ */
 function renderAdvRiskHub(candles) {
   const last = candles[candles.length - 1];
   const prev = candles[candles.length - 2] || last;
@@ -281,6 +378,9 @@ function renderAdvRiskHub(candles) {
   }
 }
 
+/**
+ * 5. 渲染多週期動能矩陣 (Δ₁ / Δ₅ / Δ₁₀)
+ */
 function renderDeltaMatrix(candles) {
   const tbody = document.getElementById('deltaMatrixBody');
   if (!tbody) return;
@@ -324,6 +424,9 @@ function renderDeltaMatrix(candles) {
   }).join('');
 }
 
+/**
+ * 6. 渲染歷史交易紀錄表（雙倉 + 加權總報酬 85/15）
+ */
 function renderHistoryTable(trades, dataLength, backtestResult) {
   const tbody = document.getElementById('historyTableBody');
   const summaryEl = document.getElementById('historySummary');
