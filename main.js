@@ -1,11 +1,15 @@
 /**
  * main.js - 四指標趨勢分析 UI 控制器
  * 
+ * ========== v11.2.1 修正 ==========
+ * 【關鍵修正】指標先計算、再過濾（避免暖機期浪費）
+ * - 在完整資料上計算指標（暖機用舊資料）
+ * - 過濾後保留完整指標，訊號區間不縮減
+ * 
  * ========== 核心設計 ==========
  * - 資金配置：核心倉 85% / 戰術倉 15%
- * - 當日分析：頁首、四指標、ADV 風控、Δ 動能矩陣
- * - 歷史回測：頁尾歷史系統決策訊號紀錄
  * - 交易單位：張（1 張 = 1000 股）
+ * - 遇非交易日，當日分析使用前一個交易日資料
  */
 
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbyP4to4WeWt17kngG-5UpKIMPz3Mp3tKfzVt6mNBfOQkEuyGQK0rUNxyJHz1jo2_8Iz/exec";
@@ -53,23 +57,43 @@ async function analyzeStock() {
       throw new Error(`查無股票代碼 [${stockCode}] 之有效 K 線數據`);
     }
 
-    let candles = normalizeCandleData(rawCandles);
-    const originalLength = candles.length;
+    // ============================================================
+    // 【關鍵修正】先在完整資料上計算指標，再過濾
+    // ============================================================
+    const allCandles = normalizeCandleData(rawCandles);
+    const originalLength = allCandles.length;
 
-    if (ENABLE_ONE_YEAR_FILTER && candles.length > 0) {
-      const lastDate = new Date(candles[candles.length - 1].date);
+    if (allCandles.length < 48) {
+      throw new Error(`數據長度僅 ${allCandles.length} 天，不足 48 天指標暖機門檻`);
+    }
+
+    // 【步驟 1】在完整資料上計算指標（暖機用舊資料）
+    const allProcessed = engine.calculateIndicators(allCandles);
+
+    // 【步驟 2】過濾到近 1 年
+    let startIdx = 0;
+    let candles = allCandles;
+    let processedCandles = allProcessed;
+
+    if (ENABLE_ONE_YEAR_FILTER) {
+      const lastDate = new Date(allCandles[allCandles.length - 1].date);
       const cutoffDate = new Date(lastDate);
       cutoffDate.setDate(cutoffDate.getDate() - ONE_YEAR_DAYS);
-      candles = candles.filter(c => new Date(c.date) >= cutoffDate);
+
+      startIdx = allCandles.findIndex(c => new Date(c.date) >= cutoffDate);
+      if (startIdx < 0) startIdx = 0;
+
+      candles = allCandles.slice(startIdx);
+      processedCandles = allProcessed.slice(startIdx);
     }
 
     if (candles.length < 48) {
-      throw new Error(`數據長度僅 ${candles.length} 天，不足 48 天指標暖機門檻`);
+      throw new Error(`過濾後數據長度僅 ${candles.length} 天，不足 48 天指標暖機門檻`);
     }
 
     renderDataDateInfo(candles, originalLength, stockCode);
 
-    const processedCandles = engine.calculateIndicators(candles);
+    // 【步驟 3】執行回測（用已計算好的指標）
     const backtestResult = engine.runFullCompoundBacktest(candles, 100000, processedCandles);
 
     renderHeaderAndStockInfo(stockCode, stockName, processedCandles);
@@ -405,7 +429,6 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
   const transactionLog = backtestResult.transactionLog || [];
   let currentView = 'log';
 
-  // 建立切換按鈕
   if (toggleEl) {
     toggleEl.innerHTML = `
       <button onclick="switchView('log')" id="btnLog"
@@ -440,7 +463,6 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
       return;
     }
 
-    // ===== 流水帳檢視 =====
     if (currentView === 'log') {
       if (!transactionLog || transactionLog.length === 0) {
         tbody.innerHTML = `<tr><td colspan="7" class="p-6 text-slate-500 text-center font-sans">
@@ -450,7 +472,6 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
         return;
       }
 
-      // 摘要
       if (summaryEl && backtestResult) {
         const wins = trades.filter(t => t.pnlPct > 0).length;
         const winRate = trades.length > 0 ? Math.round((wins / trades.length) * 100) : 0;
@@ -470,7 +491,6 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
         const row = document.createElement('tr');
         row.className = 'border-b border-slate-700/40 hover:bg-slate-800/60 transition';
 
-        // 動作樣式
         let actionBadge;
         if (tx.action === 'BUY') {
           actionBadge = `<span class="text-xs px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-700/50">🟢 買入</span>`;
@@ -480,10 +500,8 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
           actionBadge = `<span class="text-xs px-2 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-700/50">➕ ${tx.actionLabel}</span>`;
         }
 
-        // 資金池
         const poolBadge = tx.pool ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-600">${tx.pool}</span>` : '';
 
-        // 訊號
         let signalInfo = '';
         if (tx.action === 'BUY') {
           const gradeColor = tx.signalInfo?.includes('A級') ? 'text-emerald-400'
@@ -498,17 +516,13 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
           signalInfo = `<span class="text-xs text-amber-400">${tx.signalInfo}</span>`;
         }
 
-        // 張數
         const lotsDisplay = tx.lots !== undefined ? tx.lots.toFixed(0) + ' 張' : Math.round(tx.shares / 1000) + ' 張';
 
-        // 報酬
         let returnDisplay = '<span class="text-slate-500">--</span>';
         if (tx.action === 'SELL' || tx.action === 'ADD') {
           const isProfit = tx.returnPct > 0;
           const returnColor = isProfit ? 'text-emerald-400' : 'text-rose-400';
           returnDisplay = `<span class="${returnColor} font-bold">${tx.returnPct >= 0 ? '+' : ''}${tx.returnPct.toFixed(2)}%</span>`;
-        } else if (tx.action === 'BUY') {
-          returnDisplay = '<span class="text-slate-500">--</span>';
         }
 
         row.innerHTML = `
@@ -524,7 +538,6 @@ function renderHistoryTable(trades, dataLength, backtestResult) {
       });
 
     } else {
-      // ===== 配對檢視 =====
       if (!trades || trades.length === 0) {
         tbody.innerHTML = `<tr><td colspan="7" class="p-6 text-slate-500 text-center font-sans">
           近 1 年內無符合之進場訊號
